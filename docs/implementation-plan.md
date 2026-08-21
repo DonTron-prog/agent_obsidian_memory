@@ -132,7 +132,7 @@ The user confirms that the specification captures the intended system, including
 
 - exact slug/title outranks body-only matches;
 - type and scope filters are exact;
-- stale and unverified filters behave as specified;
+- stale and verification-tier filters (`unverified`, `machine-confirmed`, and `human-reviewed`) behave as specified;
 - result order is stable across runs;
 - search explains matched fields;
 - search does not require a generated index to be correct;
@@ -521,7 +521,7 @@ The following work requires a separate proposal based on observed MVP evidence:
 |---|---|
 | Embeddings/vector search | documented retrieval misses not solved by metadata/full text |
 | Reranking | irrelevant deterministic result sets with measurable task impact |
-| Automatic workflow learning | repeated procedures and a way to score successful outcomes |
+| Automatic workflow discovery and adaptive refinement | recurring tasks that are not already represented by explicit Procedure use events, measured outcomes, and a fixed evaluation approach; deterministic promotion of an existing eligible Procedure remains in the MVP |
 | Typed relations | queries that cannot be expressed reliably through links and prose |
 | Direct-edit watcher | reconciliation burden high enough to justify daemon complexity |
 | Native Hermes memory logging | meaningful unobserved changes causing audit gaps |
