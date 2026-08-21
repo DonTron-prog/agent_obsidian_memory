@@ -38,8 +38,8 @@ The project is currently specified but not yet implemented. The MVP baseline inc
 - Substantial concept changes clear active verification, while Git and `memory/log.md` preserve review history.
 - Managed writes do not pause Syncthing and remain available when it is down. Conflict copies still block writes, and target hashes are checked immediately before replacement.
 - Any pre-existing staged Git path blocks managed writes; unrelated unstaged files remain untouched.
-- The vault is the source of truth for selected non-secret agent files. Pi and Hermes load them through direct paths or symlinks after a backed-up migration.
-- Vault-managed files include Pi `AGENTS.md`, `settings.json`, optional system-prompt files, Hermes `SOUL.md`, `USER.md`, `MEMORY.md`, and `config.yaml`.
-- User-created Pi skills and user-created or modified Hermes skills are migrated into `shared`, `pi-only`, or `hermes-only`; untouched bundled skills remain in native package-managed locations.
+- Agent-file, configuration, and skill migration is deferred beyond the MVP. The MVP performs no load-path cutover, symlink creation, or migration/rollback workflow.
+- The MVP only copies Pi `AGENTS.md` and Hermes `SOUL.md`, `USER.md`, and `MEMORY.md` into the vault as visibility snapshots. Native files remain authoritative and may diverge from these copies.
+- The user will establish symlinks later outside this MVP. `settings.json`, `config.yaml`, system-prompt files, and existing skills remain native.
 - Hermes gateway and Telegram compression checkpoints are immediate. Hermes CLI 0.20.0 compressed intervals are captured at reset or finalization; no core patch is included.
 - `memory status`, automatic Git push, remote fingerprinting, and extra Bases views are deferred.

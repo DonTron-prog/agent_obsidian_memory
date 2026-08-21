@@ -290,7 +290,9 @@ A synthetic session with two compactions and finalization can terminate immediat
 
 Focused integration tests show that a procedure with three fixture uses is promoted automatically to a loadable shared skill while retaining a concise source Procedure and provenance.
 
-## 11. Milestone 7 — Initial agent-file copy
+## 11. Milestone 7 — Visibility snapshots; migration deferred
+
+This milestone is not migration or cutover. Native files remain authoritative, and no agent load path is changed.
 
 ### Work
 
@@ -301,6 +303,7 @@ Focused integration tests show that a procedure with three fixture uses is promo
 
 ### Deferred work
 
+- all agent-file migration and native-path cutover;
 - symlink creation;
 - configuration and settings migration;
 - skill migration and bundled-skill classification;
@@ -318,7 +321,7 @@ Focused integration tests show that a procedure with three fixture uses is promo
 
 ### Gate
 
-A temporary fake Pi/Hermes home copies only the four approved context files without changing native files, importing secrets, or creating symlinks.
+A temporary fake Pi/Hermes home copies only the four approved context files as snapshots without changing native files, changing load paths, importing secrets, or creating symlinks.
 
 ## 12. Milestone 8 — Pi adapter
 
@@ -501,7 +504,7 @@ Before production use, documentation must cover:
 - Syncthing setup and exclusions;
 - vault initialization;
 - Pi and Hermes adapter installation;
-- initial agent-file copy and its snapshot limitation;
+- initial visibility snapshot copy, the explicit migration deferral, and the snapshot limitation;
 - search and mutation examples;
 - direct edit reconciliation;
 - duplicate resolution;
@@ -524,6 +527,7 @@ The following work requires a separate proposal based on observed MVP evidence:
 | Automatic workflow learning | repeated procedures and a way to score successful outcomes |
 | Typed relations | queries that cannot be expressed reliably through links and prose |
 | Direct-edit watcher | reconciliation burden high enough to justify daemon complexity |
+| Agent-file/configuration/skill migration and symlink cutover | a separately approved migration, backup, validation, divergence, and rollback design |
 | Native Hermes memory logging | meaningful unobserved changes causing audit gaps |
 | Hard channel isolation | Hermes begins serving untrusted users or groups |
 | Retrieval optimization | baseline access logs and task outcomes sufficient for evaluation |

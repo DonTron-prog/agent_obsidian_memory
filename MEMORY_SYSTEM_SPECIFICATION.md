@@ -46,6 +46,7 @@ Defer the following until the MVP is trusted and evaluated:
 - Hard filesystem access isolation.
 - Automatic logging of native Hermes edits to `MEMORY.md` and `USER.md`.
 - Watcher-based detection of direct Obsidian edits.
+- Agent-file migration, configuration migration, skill migration, symlink cutover, and rollback tooling.
 - Automatic workflow optimization beyond the agreed procedure-to-skill lifecycle.
 
 ## 4. Repository and storage boundaries
@@ -507,41 +508,34 @@ skills/hermes-only/
 
 Use `shared/` whenever possible. Use agent-specific directories only when a skill depends on agent-specific tools or metadata.
 
-The MVP migrates user-authored skills into the vault. Import Pi user skills and only user-created or user-modified Hermes skills; untouched bundled and upstream skills remain in their native package-managed locations. Each migrated skill is classified as `shared`, `pi-only`, or `hermes-only`, with `shared` preferred.
+Skill migration is deferred beyond the MVP. When it is implemented later, import Pi user skills and only user-created or user-modified Hermes skills; untouched bundled and upstream skills should remain in their native package-managed locations.
 
 ## 14. Agent-specific files
 
-### 14.1 Canonical-file boundary
+### 14.1 MVP snapshot boundary
 
-The Obsidian vault is the source of truth for selected non-secret agent files. After migration, Pi and Hermes load these files directly from the vault through supported configuration paths or symlinks; separate writable copies are not maintained.
+Agent-file migration is deferred beyond the MVP. The MVP only copies selected non-secret context files into the vault as visibility snapshots. It does not change native load paths, create symlinks, migrate configuration or skills, perform a cutover, or provide migration and rollback tooling.
 
-Migration must be non-destructive: inventory and audit sources, back up originals outside the vault, create vault targets without overwriting existing content, switch native paths atomically, validate each agent, and provide a documented rollback.
+Native files remain the runtime source of truth, and the vault snapshots may diverge until the user establishes symlinks later. The snapshot copy must not be described or treated as migration.
 
 ### 14.2 Pi files
 
-Vault-managed Pi files are:
-
-- global `AGENTS.md`;
-- `settings.json` after secret auditing; and
-- `SYSTEM.md` and `APPEND_SYSTEM.md` when they exist or are intentionally created.
-
-Pi loads `skills/shared/` and `skills/pi-only/` from the vault. User-created Pi skills are migrated and classified; installed package code, authentication, trust state, caches, and raw JSONL sessions remain native.
+The MVP copies global `AGENTS.md` into `agents/pi/` when it exists. `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, Pi skills, installed package code, authentication, trust state, caches, and raw JSONL sessions remain native and outside MVP management.
 
 ### 14.3 Hermes files
 
-Vault-managed Hermes files are:
+The MVP copies these files without changing their native versions:
 
 - `SOUL.md`;
-- `memories/USER.md`;
-- `memories/MEMORY.md`; and
-- `config.yaml` after secret auditing and conversion of any secret literals to environment references.
+- `memories/USER.md`; and
+- `memories/MEMORY.md`.
 
-Hermes loads `skills/shared/` and `skills/hermes-only/` from the vault while untouched bundled skills remain in `~/.hermes/skills/`. Hermes's native `MEMORY.md` writing remains enabled and therefore updates the vault file directly.
+Hermes `config.yaml`, skills, load-path changes, and symlinks are deferred. Hermes's native `MEMORY.md` writing remains enabled at its native path.
 
 - `USER.md` is compact, durable profile context.
 - `MEMORY.md` is a compact working-context map for recent or active projects and work.
 - `MEMORY.md` should link toward authoritative OKF concepts and should not become a second long-term knowledge store.
-- Native Hermes edits to `MEMORY.md` and `USER.md` do not create `memory/log.md` entries in the MVP; hook- or watcher-based logging is deferred.
+- Later native edits do not automatically update the vault snapshots or create `memory/log.md` entries.
 
 ### 14.4 Exclusions
 
@@ -656,15 +650,13 @@ Error records include timestamp, agent, session ID, operation, and retry status.
 - Hard filesystem isolation is deferred.
 - This is not a security boundary against an agent with unrestricted shell access.
 
-## 19. Initial migration and rollback
+## 19. Migration deferred
 
-The MVP migrates the selected Pi and Hermes files described in Section 14 and makes their vault paths canonical. Native load paths are switched to the vault using supported configuration or symlinks only after originals have been backed up and secret scans pass.
+All agent-file, configuration, and skill migration is deferred beyond the MVP. The MVP does not make vault copies canonical, switch native load paths, create symlinks, or implement inventory, cutover, divergence, or rollback workflows.
 
-User-created Pi skills and user-created or user-modified Hermes skills are migrated into the appropriate vault skill directory. Untouched Hermes bundled skills and installed third-party package content are not copied. Skill classification should use Hermes's bundled manifest and source metadata where available, with ambiguous cases reported for review rather than guessed.
+The only MVP action is the one-time snapshot copy described in Section 14: Pi `AGENTS.md` and Hermes `SOUL.md`, `memories/USER.md`, and `memories/MEMORY.md`. Native files remain unchanged and authoritative. The user will establish symlinks later outside this MVP.
 
-Do not migrate old Honcho or Open Second Brain memories automatically. They may be reviewed and migrated selectively later to avoid carrying forward low-quality or conflicting knowledge.
-
-Migration must provide a dry run, an inventory, collision reporting, post-switch Pi/Hermes validation, and a rollback that restores the backed-up native files without deleting vault content.
+When migration is designed later, it must be non-destructive and explicitly address backups, secret auditing, collisions, validation, divergence, and rollback. Do not migrate old Honcho or Open Second Brain memories automatically. Hermes skill migration must include only user-created or user-modified skills, not the complete bundled catalog.
 
 ## 20. MVP acceptance criteria
 

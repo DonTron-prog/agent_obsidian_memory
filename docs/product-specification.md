@@ -74,7 +74,7 @@ The MVP does not:
 - watch all Obsidian edits continuously;
 - automatically summarize native Hermes edits to `MEMORY.md` or `USER.md` in the OKF log;
 - manage Pi extensions, Pi prompt templates, Hermes plugins, or Hermes hooks as vault content;
-- migrate agent configuration, skills, symlinks, prior Honcho memories, or Open Second Brain memories;
+- perform agent-file, configuration, or skill migration; establish symlinks or native-path cutover; or migrate prior Honcho or Open Second Brain memories;
 - automatically push Git commits or require remote availability for local writes;
 - pause Syncthing through its REST API;
 - treat Syncthing as a backup system; or
@@ -279,7 +279,7 @@ Summary, extraction, or automatic-promotion failure must not block compaction, r
 
 ### 11.1 MVP copy boundary
 
-The MVP copies selected agent context files into the vault for visibility without changing their native locations. It does not create symlinks or keep the copies synchronized. Native files remain the runtime source of truth until the user establishes symlinks later.
+Agent-file migration is deferred beyond the MVP. The MVP only copies selected agent context files into the vault as visibility snapshots without changing their native locations. This is not a migration or cutover: it does not create symlinks, change agent load paths, or keep the copies synchronized. Native files remain the runtime source of truth until the user establishes symlinks later.
 
 ### 11.2 Pi files
 
@@ -293,7 +293,7 @@ The MVP copies:
 - `memories/USER.md`; and
 - `memories/MEMORY.md`.
 
-`config.yaml`, skills, symlinks, and general migration tooling are deferred. `MEMORY.md` remains a compact, native working-context map for recent or active work and projects; it is not the authoritative durable concept store. Later native edits do not automatically update the vault copy or create managed OKF log entries.
+`config.yaml`, skills, all migration and rollback tooling, load-path changes, and symlinks are deferred. `MEMORY.md` remains a compact, native working-context map for recent or active work and projects; it is not the authoritative durable concept store. Later native edits do not automatically update the vault copy or create managed OKF log entries.
 
 Hermes secrets, authentication, logs, caches, locks, raw sessions, `state.db`, database sidecars, and bundled skills remain outside the vault.
 
@@ -428,6 +428,10 @@ Potential additions include watcher-based logging of native Hermes memory edits,
 ### 17.4 Stronger security
 
 If Hermes later participates in untrusted channels, work knowledge requires a stronger boundary using separate profiles, Unix permissions, sandboxing, or channel-specific agent processes.
+
+### 17.5 Agent-file migration
+
+A later proposal may make selected vault files canonical and connect native agent paths through configuration or symlinks. That work must separately define backups, secret auditing, skill classification, collision handling, divergence, validation, cutover, and rollback. None of it is part of the MVP.
 
 ## 18. Hermes CLI compatibility decision
 

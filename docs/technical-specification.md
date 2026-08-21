@@ -115,7 +115,7 @@ This repository contains no user memory corpus, raw sessions, or credentials.
 
 `memory/` alone is an OKF bundle. Markdown elsewhere in the vault follows its native format and is outside OKF conformance checks.
 
-Transaction journals, rendered candidates, and backups live outside the vault at `/home/donald/.agent-memory-txn/`. The CLI verifies that this sibling directory is on the same filesystem as the vault before a write. Files under `agents/` are one-time MVP copies; native agent files remain authoritative until the user creates symlinks later.
+Transaction journals, rendered candidates, and backups live outside the vault at `/home/donald/.agent-memory-txn/`. The CLI verifies that this sibling directory is on the same filesystem as the vault before a write. Files under `agents/` are one-time MVP visibility snapshots, not migrated files; native agent files remain authoritative until the user creates symlinks later outside the MVP.
 
 ### 3.3 Exclusions
 
@@ -831,18 +831,18 @@ Hash rechecks catch synchronized changes that arrive before each replacement. Be
 
 "Hot reload" means that files created or changed on the server become visible in the local Obsidian vault after Syncthing propagation and normal Obsidian filesystem refresh. It does not require Pi or Hermes to re-read every changed context file during an already-running model call.
 
-## 17. Initial agent-file copy
+## 17. Snapshot copy; migration deferred
 
-The MVP performs a one-time, non-destructive copy of selected context files after confirming that each source is a regular non-secret text file:
+All agent-file, configuration, and skill migration is outside the MVP. The MVP performs only a one-time, non-destructive visibility copy of selected context files after confirming that each source is a regular non-secret text file:
 
 - Pi global `AGENTS.md` to `agents/pi/AGENTS.md` when present;
 - Hermes `SOUL.md` to `agents/hermes/SOUL.md`;
 - Hermes `memories/USER.md` to `agents/hermes/memories/USER.md`; and
 - Hermes `memories/MEMORY.md` to `agents/hermes/memories/MEMORY.md`.
 
-The operation does not remove, rewrite, or replace native files. It creates no symlinks and no ongoing synchronization between native paths and vault copies. Existing vault targets are never overwritten without explicit user handling.
+This operation is not migration or cutover. It does not remove, rewrite, or replace native files, change load paths, create symlinks, or provide ongoing synchronization between native paths and vault copies. Existing vault targets are never overwritten without explicit user handling.
 
-Configuration transformation, settings/config migration, skill import, source inventory, bundled-skill classification, symlink creation, divergence handling, and rollback tooling are outside the MVP. The user will establish symlinks later.
+Configuration transformation, settings/config migration, skill import, source inventory, bundled-skill classification, symlink creation, divergence handling, and rollback tooling are outside the MVP. The user will establish symlinks later outside the MVP.
 
 ## 18. Security and privacy
 
@@ -862,7 +862,7 @@ Configuration transformation, settings/config migration, skill import, source in
 - Vault configuration has a numeric `version`.
 - Batch transaction schemas have an independent version.
 - Local frontmatter extensions are backward-compatible additions to OKF v0.2.
-- The MVP agent-file copy is explicit, non-destructive, and does not overwrite existing vault targets.
+- Agent-file, configuration, and skill migration is deferred; the MVP visibility copy is explicit, non-destructive, and does not overwrite existing vault targets.
 - Adapter compatibility is tested against the installed Pi and Hermes versions and documented in release notes.
 - A native agent upgrade that changes lifecycle hooks or file formats causes `memory doctor` to warn until compatibility is revalidated.
 
