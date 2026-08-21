@@ -215,7 +215,7 @@ Agents retrieve context when needed by:
 3. running metadata or full-text searches; and
 4. opening only the relevant concepts.
 
-The first implementation uses filenames, OKF metadata, tags, links, and full-text search. Results use one fixed ordering: exact ID or slug, exact title, partial title, tags and description, body text, then a stable alphabetical tie-break. The CLI explains matched fields; ordering is not configurable in the MVP.
+The first implementation uses filenames, OKF metadata, tags, links, and full-text search. Results use one fixed ordering: exact ID or slug, exact title, partial title, tags and description, then body text. Within the same match tier, results are sorted case-insensitively by title and then by concept ID. The CLI explains matched fields; ordering is not configurable in the MVP.
 
 ### 9.3 Retrieval observability
 
@@ -419,7 +419,7 @@ After the MVP has produced a useful corpus, retrieval misses and irrelevant read
 
 ### 17.2 Adaptive workflows
 
-Later versions may detect recurring tasks, suggest procedure refinement, evaluate retrieved context usefulness, and improve promotion decisions. These features require measured outcomes and a fixed evaluation approach rather than intuition alone.
+Later versions may detect recurring tasks, suggest procedure refinement, evaluate retrieved context usefulness, and improve promotion decisions. These automatic workflow-discovery and adaptive-refinement features require measured outcomes and a fixed evaluation approach rather than intuition alone. They are distinct from the MVP's deterministic promotion of an existing Procedure after its explicit eligibility conditions are satisfied.
 
 ### 17.3 Additional observability
 
