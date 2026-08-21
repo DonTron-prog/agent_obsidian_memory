@@ -21,6 +21,7 @@ from agent_memory.initialization import initialize_vault
 from agent_memory.locking import writer_lock
 from agent_memory.mutations import (
     MutationContext,
+    MutationResult,
     apply_operations,
     rebuild_index,
     reconcile_concept,
@@ -592,6 +593,36 @@ def _read_batch(path: str) -> dict[str, Any]:
     return value
 
 
+def _print_mutation_result(
+    args: argparse.Namespace,
+    result: MutationResult,
+    *,
+    include_candidates: bool = False,
+    empty_message: str | None = None,
+) -> int:
+    transaction = result.transaction
+    payload = {
+        "transaction_id": transaction.transaction_id,
+        "changed_paths": list(transaction.changed_paths),
+        "commit_hash": transaction.commit_hash,
+        "dry_run": transaction.dry_run,
+    }
+    if include_candidates:
+        payload["duplicate_candidates"] = list(result.duplicate_candidates)
+    if args.json_output:
+        _json(payload)
+    elif transaction.changed_paths:
+        mode = "Would change" if transaction.dry_run else "Changed"
+        print(f"{mode}: {', '.join(transaction.changed_paths)}")
+        if transaction.commit_hash:
+            print(f"Commit: {transaction.commit_hash}")
+        if result.duplicate_candidates:
+            print(f"Candidates: {', '.join(result.duplicate_candidates)}")
+    elif empty_message:
+        print(empty_message)
+    return 0
+
+
 def _mutate(args: argparse.Namespace) -> int:
     config, vault = _config_and_vault(args)
     interactive_verification = False
@@ -633,23 +664,7 @@ def _mutate(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         interactive_verification=interactive_verification,
     )
-    payload = {
-        "transaction_id": result.transaction.transaction_id,
-        "changed_paths": list(result.transaction.changed_paths),
-        "commit_hash": result.transaction.commit_hash,
-        "dry_run": result.transaction.dry_run,
-        "duplicate_candidates": list(result.duplicate_candidates),
-    }
-    if args.json_output:
-        _json(payload)
-    else:
-        mode = "Would change" if result.transaction.dry_run else "Changed"
-        print(f"{mode}: {', '.join(result.transaction.changed_paths)}")
-        if result.transaction.commit_hash:
-            print(f"Commit: {result.transaction.commit_hash}")
-        if result.duplicate_candidates:
-            print(f"Candidates: {', '.join(result.duplicate_candidates)}")
-    return 0
+    return _print_mutation_result(args, result, include_candidates=True)
 
 
 def _reconcile(args: argparse.Namespace) -> int:
@@ -661,41 +676,13 @@ def _reconcile(args: argparse.Namespace) -> int:
         summary=args.summary,
         dry_run=args.dry_run,
     )
-    payload = {
-        "transaction_id": result.transaction.transaction_id,
-        "changed_paths": list(result.transaction.changed_paths),
-        "commit_hash": result.transaction.commit_hash,
-        "dry_run": result.transaction.dry_run,
-    }
-    if args.json_output:
-        _json(payload)
-    else:
-        mode = "Would change" if result.transaction.dry_run else "Changed"
-        print(f"{mode}: {', '.join(result.transaction.changed_paths)}")
-        if result.transaction.commit_hash:
-            print(f"Commit: {result.transaction.commit_hash}")
-    return 0
+    return _print_mutation_result(args, result)
 
 
 def _rebuild_index(args: argparse.Namespace) -> int:
     config, vault = _config_and_vault(args)
     result = rebuild_index(vault, config, dry_run=args.dry_run)
-    payload = {
-        "transaction_id": result.transaction.transaction_id,
-        "changed_paths": list(result.transaction.changed_paths),
-        "commit_hash": result.transaction.commit_hash,
-        "dry_run": result.transaction.dry_run,
-    }
-    if args.json_output:
-        _json(payload)
-    elif result.transaction.changed_paths:
-        mode = "Would change" if result.transaction.dry_run else "Changed"
-        print(f"{mode}: {', '.join(result.transaction.changed_paths)}")
-        if result.transaction.commit_hash:
-            print(f"Commit: {result.transaction.commit_hash}")
-    else:
-        print("Concept index is already current.")
-    return 0
+    return _print_mutation_result(args, result, empty_message="Concept index is already current.")
 
 
 def _recover(args: argparse.Namespace) -> int:

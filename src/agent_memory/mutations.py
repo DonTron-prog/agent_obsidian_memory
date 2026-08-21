@@ -129,6 +129,15 @@ def _head_texts(vault: Vault) -> dict[str, str]:
     return result
 
 
+def _transaction_state_dir(vault: Vault, config: Mapping[str, Any]) -> Path:
+    state_dir = Path(config["transactions"]["state_dir"])
+    try:
+        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
+    except ValueError:
+        return state_dir
+    raise TransactionError("transaction state directory must be outside the vault")
+
+
 def _resolve_slug(texts: Mapping[str, str], value: str) -> str:
     candidate = value.removeprefix("concepts/")
     validate_slug(candidate)
@@ -352,13 +361,7 @@ def apply_operations(
             "interactive verification requires one verify operation in the configured human context"
         )
     actor = _validate_context(context, summary)
-    state_dir = Path(config["transactions"]["state_dir"])
-    try:
-        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
-    except ValueError:
-        pass
-    else:
-        raise TransactionError("transaction state directory must be outside the vault")
+    state_dir = _transaction_state_dir(vault, config)
     lock_path = state_dir / "writer.lock"
     with writer_lock(
         lock_path,
@@ -627,13 +630,7 @@ def reconcile_concept(
     human = str(config["identity"]["human"])
     context = MutationContext(human)
     actor = _validate_context(context, summary)
-    state_dir = Path(config["transactions"]["state_dir"])
-    try:
-        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
-    except ValueError:
-        pass
-    else:
-        raise TransactionError("transaction state directory must be outside the vault")
+    state_dir = _transaction_state_dir(vault, config)
 
     with writer_lock(
         state_dir / "writer.lock",
@@ -714,7 +711,7 @@ def reconcile_concept(
             max_words=int(config["limits"]["concept_words"]),
             dry_run=dry_run,
             fault_hook=fault_hook,
-            adopted_paths={relative: current_hash},
+            adopted_path=(relative, current_hash),
         )
         return MutationResult(transaction)
 
@@ -728,13 +725,7 @@ def rebuild_index(
 ) -> MutationResult:
     """Rebuild the concept index only from a clean concept corpus."""
 
-    state_dir = Path(config["transactions"]["state_dir"])
-    try:
-        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
-    except ValueError:
-        pass
-    else:
-        raise TransactionError("transaction state directory must be outside the vault")
+    state_dir = _transaction_state_dir(vault, config)
 
     with writer_lock(
         state_dir / "writer.lock",
@@ -747,32 +738,24 @@ def rebuild_index(
             for path in head_concept_paths(vault.root)
             if Path(path).parent == Path("memory/concepts") and Path(path).name != "index.md"
         }
-        present = {
-            path.relative_to(vault.root).as_posix()
-            for path in (vault.bundle / "concepts").iterdir()
-            if path.name != "index.md" and path.suffix == ".md"
-        }
-        corpus_dirty = dirty_paths(vault.root, tuple(sorted(tracked | present)))
-        if corpus_dirty:
-            raise TransactionError(
-                "unreconciled concept edits block full index rebuild: "
-                f"{', '.join(corpus_dirty)}. Reconcile each changed tracked concept with "
-                "memory reconcile; resolve added, deleted, or renamed files manually."
-            )
 
+        def ensure_clean_corpus() -> None:
+            present = {
+                path.relative_to(vault.root).as_posix()
+                for path in (vault.bundle / "concepts").iterdir()
+                if path.name != "index.md" and path.suffix == ".md"
+            }
+            dirty = dirty_paths(vault.root, tuple(sorted(tracked | present)))
+            if dirty:
+                raise TransactionError(
+                    "unreconciled concept edits block full index rebuild: "
+                    f"{', '.join(dirty)}. Reconcile each changed tracked concept with "
+                    "memory reconcile; resolve added, deleted, or renamed files manually."
+                )
+
+        ensure_clean_corpus()
         rendered = _render_index(_head_texts(vault)).encode()
-        raced_present = {
-            path.relative_to(vault.root).as_posix()
-            for path in (vault.bundle / "concepts").iterdir()
-            if path.name != "index.md" and path.suffix == ".md"
-        }
-        raced_dirty = dirty_paths(vault.root, tuple(sorted(tracked | raced_present)))
-        if raced_dirty:
-            raise TransactionError(
-                "unreconciled concept edits block full index rebuild: "
-                f"{', '.join(raced_dirty)}. Reconcile each changed tracked concept with "
-                "memory reconcile; resolve added, deleted, or renamed files manually."
-            )
+        ensure_clean_corpus()
         if vault.concept_index.read_bytes() == rendered:
             dirty_index = dirty_paths(vault.root, ("memory/concepts/index.md",))
             if dirty_index:
