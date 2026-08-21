@@ -28,6 +28,12 @@ _ASSIGNMENT = re.compile(
     r"[\"']?\s*[:=]\s*(?P<value>[^\r\n]+)"
     r")$"
 )
+_INLINE_ASSIGNMENT = re.compile(
+    r"(?i)(?:authorization\s*:\s*bearer\s+|"
+    r"(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"bot[_-]?token|oauth[_-]?(?:token|secret)|client[_-]?secret|secret)"
+    r"\s*[:=]\s*)([^\s,;]+)"
+)
 _PLACEHOLDER = re.compile(
     r"(?i)^(?:"
     r"\$|<|\{|os\.environ|os\.getenv|env\.|process\.env|settings\.|config\.|"
@@ -96,3 +102,22 @@ def reject_secret_content(text: str, *, path: str) -> None:
     for match in _ASSIGNMENT.finditer(text):
         if _literal_secret(match.group("bearer") or match.group("value") or ""):
             raise SecretError(f"secret-bearing content is not allowed: {path}")
+
+
+def contains_secret(text: str) -> bool:
+    """Return whether text would be rejected without exposing the matching value."""
+
+    try:
+        reject_secret_content(text, path="content")
+    except SecretError:
+        return True
+    return any(_literal_secret(match.group(1)) for match in _INLINE_ASSIGNMENT.finditer(text))
+
+
+def redact_sensitive_text(text: object, *, limit: int = 240) -> str:
+    """Produce concise diagnostic text without retaining secret-bearing input."""
+
+    value = str(text).replace("\r", " ").replace("\n", " ")
+    if contains_secret(value):
+        return "[redacted sensitive content]"
+    return value[:limit] + ("…" if len(value) > limit else "")

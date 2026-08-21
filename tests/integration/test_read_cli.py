@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from agent_memory.audit import AuditError, RetrievalContext, append_access_event, spool_path
+from agent_memory.audit import (
+    AuditError,
+    RetrievalContext,
+    append_access_event,
+    read_access_events,
+    spool_path,
+)
 from agent_memory.cli import main
 from agent_memory.search import resolve_concept, search_concepts
 from agent_memory.vault import discover_vault, scan_concepts
@@ -48,6 +54,21 @@ def test_retrieval_context_rejects_model_whitespace() -> None:
         RetrievalContext("session", "pi", " openai/gpt-5")
     with pytest.raises(AuditError, match="exact provider/model"):
         RetrievalContext("session", "pi", "openai/gpt-5 ")
+
+
+@pytest.mark.parametrize(
+    ("field", "secret"),
+    (
+        ("session_id", "api_key=abcdefghijklmnop"),
+        ("agent", "access_token=abcdefghijklmnop"),
+        ("model", "openai/sk-live-abcdefghijklmnop"),
+    ),
+)
+def test_retrieval_context_rejects_secret_bearing_provenance(field: str, secret: str) -> None:
+    values = {"session_id": "session", "agent": "pi", "model": "openai/gpt-5"}
+    values[field] = secret
+    with pytest.raises(AuditError, match="sensitive content"):
+        RetrievalContext(**values)
 
 
 def test_cli_root_search_show_audit_flow_does_not_write_vault(
@@ -110,6 +131,7 @@ def test_cli_root_search_show_audit_flow_does_not_write_vault(
     events = [json.loads(line) for line in spool.read_text(encoding="utf-8").splitlines()]
     assert [event["mode"] for event in events] == ["search", "show"]
     assert events[0] == {
+        "event_id": events[0]["event_id"],
         "agent": "pi/0.84.2",
         "concepts": ["concepts/example-concept"],
         "mode": "search",
@@ -181,6 +203,54 @@ def test_audit_state_cannot_be_inside_synchronized_vault(tmp_path: Path, capsys)
     assert code == 2
     assert "outside" in json.loads(capsys.readouterr().out)["error"]
     assert not (root / "state").exists()
+
+
+def test_audit_redacts_secret_fragments_before_durable_spooling(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    append_access_event(
+        state,
+        RetrievalContext("session", "pi/1", "openai/gpt-5"),
+        mode="search",
+        query="raw prompt contains api_key=abcdefghijklmnop",
+        concepts=[],
+    )
+    text = spool_path(state, "session").read_text()
+    assert "abcdefghijklmnop" not in text
+    assert "redacted sensitive content" in text
+
+    event = json.loads(text)
+    event["concepts"] = [{"not": "text"}]
+    spool_path(state, "session").write_text(json.dumps(event) + "\n")
+    with pytest.raises(AuditError, match="concepts are invalid"):
+        read_access_events(
+            state,
+            "session",
+            start=0,
+            end=spool_path(state, "session").stat().st_size,
+        )
+
+
+def test_legacy_audit_redacts_query_reason_and_concepts_on_read(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    path = spool_path(state, "session")
+    path.parent.mkdir(parents=True)
+    legacy = {
+        "timestamp": "2026-01-02T03:04:05Z",
+        "mode": "search",
+        "agent": "pi/1",
+        "model": "openai/gpt-5",
+        "session_id": "session",
+        "query": "api_key=abcdefghijklmnop",
+        "reason": "password=qrstuvwxyzabcdef",
+        "concepts": ["access_token=zyxwvutsrqponmlk"],
+    }
+    path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+
+    records = read_access_events(state, "session", start=0, end=path.stat().st_size)
+
+    assert records[0]["query"] == "[redacted sensitive content]"
+    assert records[0]["reason"] == "[redacted sensitive content]"
+    assert records[0]["concepts"] == ["[redacted sensitive content]"]
 
 
 def test_concurrent_process_exit_appends_preserve_complete_jsonl(tmp_path: Path) -> None:

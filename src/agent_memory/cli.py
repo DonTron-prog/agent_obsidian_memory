@@ -15,9 +15,10 @@ from ruamel.yaml import YAML
 
 from agent_memory import __version__
 from agent_memory.audit import AuditError, RetrievalContext, append_access_event
-from agent_memory.config import ConfigError, load_config
+from agent_memory.config import ConfigError, load_config, validate_worker_state_dir
 from agent_memory.git import ensure_repository, staged_paths
 from agent_memory.initialization import initialize_vault
+from agent_memory.lifecycle import build_descriptor, now_utc, publish_descriptor
 from agent_memory.locking import writer_lock
 from agent_memory.mutations import (
     MutationContext,
@@ -33,6 +34,8 @@ from agent_memory.search import (
     search_concepts,
     trust_tier,
 )
+from agent_memory.sessions import recover_incomplete
+from agent_memory.systemd import install_units, lifecycle_health
 from agent_memory.transactions import (
     apply_recovery,
     incomplete_transactions,
@@ -41,6 +44,7 @@ from agent_memory.transactions import (
 )
 from agent_memory.validation import DEFAULT_TYPES
 from agent_memory.vault import VaultError, discover_vault, scan_concepts, validate_vault
+from agent_memory.worker import drain_once, retry_failed
 
 
 def _add_location(parser: argparse.ArgumentParser) -> None:
@@ -109,9 +113,75 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--json", action="store_true", dest="json_output")
     _add_location(init)
 
-    doctor = commands.add_parser("doctor", help="diagnose managed-write safety state")
+    doctor = commands.add_parser("doctor", help="diagnose managed-write and lifecycle state")
     doctor.add_argument("--json", action="store_true", dest="json_output")
     _add_location(doctor)
+
+    worker = commands.add_parser("worker", help="drain durable lifecycle work")
+    worker.add_argument("--once", action="store_true", required=True)
+    worker.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(worker)
+
+    retry = commands.add_parser("retry", help="republish failed lifecycle work")
+    retry_target = retry.add_mutually_exclusive_group(required=True)
+    retry_target.add_argument("retry_id", nargs="?")
+    retry_target.add_argument("--all", action="store_true", dest="all_failed")
+    retry.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(retry)
+
+    install = commands.add_parser("install-lifecycle", help="install systemd user lifecycle units")
+    install.add_argument("--unit-dir")
+    install.add_argument("--executable", default="memory")
+    install.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(install)
+
+    session = commands.add_parser("session", help="publish or recover logical session state")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    for name in ("start", "checkpoint", "finalize"):
+        item = session_commands.add_parser(name)
+        item.add_argument("--agent", required=True, choices=("pi", "hermes"))
+        item.add_argument("--agent-version", required=True)
+        item.add_argument("--session-id", required=True)
+        item.add_argument("--started-at", required=True)
+        item.add_argument("--occurred-at")
+        item.add_argument("--native-event-id", "--event-id", dest="native_event_id")
+        item.add_argument("--model")
+        item.add_argument("--platform")
+        item.add_argument("--native-store-ref")
+        item.add_argument("--json", action="store_true", dest="json_output")
+        _add_location(item)
+    checkpoint = session_commands.choices["checkpoint"]
+    checkpoint.add_argument(
+        "--trigger",
+        required=True,
+        choices=("compaction", "compression", "reset", "new", "finalization"),
+    )
+    checkpoint.add_argument(
+        "--summary-kind", choices=("pi", "hermes-0.20.0", "unavailable"), default="unavailable"
+    )
+    checkpoint.add_argument("--compaction-entry-id")
+    checkpoint.add_argument("--native-summary-file")
+    checkpoint.add_argument("--old-session-id")
+    checkpoint.add_argument("--in-place", action="store_true")
+    checkpoint.add_argument("--compression-count", type=int)
+    checkpoint.add_argument("--previous-message-row-id", type=int)
+    checkpoint.add_argument("--current-message-row-id", type=int)
+    checkpoint.add_argument("--candidate-row-id", type=int)
+    checkpoint.add_argument("--candidate-summary-sha256")
+    access_session = session_commands.add_parser("access")
+    access_session.add_argument("--session-id", required=True)
+    access_session.add_argument("--agent", required=True)
+    access_session.add_argument("--model", required=True)
+    access_session.add_argument("--mode", required=True, choices=("injected", "search", "show"))
+    access_session.add_argument("--query")
+    access_session.add_argument("--reason")
+    access_session.add_argument("--concept", action="append", default=[])
+    access_session.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(access_session)
+    recover_session = session_commands.add_parser("recover")
+    recover_session.add_argument("--agent", choices=("pi", "hermes"))
+    recover_session.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(recover_session)
 
     create = commands.add_parser("create", help="create a managed concept")
     create.add_argument("--type", required=True, dest="concept_type")
@@ -201,16 +271,23 @@ def _json(data: object) -> None:
     print(json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-def _config_and_vault(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
+def _selected_config_path(args: argparse.Namespace) -> str | None:
     config_path = args.config or args.global_config
     vault_override = args.vault or args.global_vault
     if config_path is None and vault_override:
         local_config = Path(vault_override).expanduser() / "system/memory.yaml"
         if local_config.is_file():
             config_path = str(local_config)
+    return config_path
+
+
+def _config_and_vault(args: argparse.Namespace) -> tuple[dict[str, Any], Any]:
+    config_path = _selected_config_path(args)
+    vault_override = args.vault or args.global_vault
     config = load_config(config_path)
     if vault_override:
         config["vault"] = str(Path(vault_override).expanduser().resolve(strict=False))
+    validate_worker_state_dir(config["worker"]["state_dir"], config["vault"])
     return config, discover_vault(config["vault"])
 
 
@@ -251,12 +328,7 @@ def _context(args: argparse.Namespace) -> RetrievalContext:
 
 
 def _audit_state(config: Mapping[str, Any], vault_root: Path) -> Path:
-    state_dir = Path(config["worker"]["state_dir"]).resolve(strict=False)
-    try:
-        state_dir.relative_to(vault_root.resolve(strict=False))
-    except ValueError:
-        return state_dir
-    raise ConfigError("worker.state_dir must be outside the synchronized vault")
+    return validate_worker_state_dir(config["worker"]["state_dir"], vault_root)
 
 
 def _configured_types(config: Mapping[str, Any]) -> frozenset[str]:
@@ -434,11 +506,14 @@ def _doctor(args: argparse.Namespace) -> int:
                     lock_owner["state"] = "stale"
         except (OSError, ValueError):
             issues.append("writer lock metadata is unreadable")
+    lifecycle = lifecycle_health(config["worker"]["state_dir"])
+    issues.extend(lifecycle["issues"])
     payload = {
         "ok": not issues,
         "issues": issues,
         "transactions": transactions,
         "lock_owner": lock_owner,
+        "lifecycle": lifecycle,
     }
     if args.json_output:
         _json(payload)
@@ -452,6 +527,9 @@ def _doctor(args: argparse.Namespace) -> int:
                 f"transaction {transaction['transaction_id']}: "
                 f"{transaction['phase']} -> {transaction['action']}"
             )
+        if lifecycle["failed_units"] or lifecycle["start_limited_units"]:
+            print("After fixing the crash, recover with:")
+            print(lifecycle["recovery"])
     return 0 if not issues else 1
 
 
@@ -707,6 +785,123 @@ def _recover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _worker(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    _audit_state(config, vault.root)
+    result = drain_once(vault.root, config)
+    if args.json_output:
+        _json(result)
+    else:
+        print(f"Processed {result['processed']} lifecycle event(s); failed {result['failed']}.")
+    return 1 if result["failed"] else 0
+
+
+def _retry_lifecycle(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    _audit_state(config, vault.root)
+    values = retry_failed(
+        config["worker"]["state_dir"], retry_id=args.retry_id, all_failed=args.all_failed
+    )
+    payload = {"republished": list(values)}
+    if args.json_output:
+        _json(payload)
+    else:
+        print(f"Republished {len(values)} lifecycle event(s).")
+    return 0
+
+
+def _install_lifecycle(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    _audit_state(config, vault.root)
+    config_path = _selected_config_path(args)
+    result = install_units(
+        config["worker"]["state_dir"],
+        unit_dir=args.unit_dir,
+        executable=args.executable,
+        config_path=config_path,
+        vault=vault.root,
+    )
+    if args.json_output:
+        _json(result)
+    else:
+        print(f"Installed {result['path_unit']} and {result['service_unit']}.")
+        if result["warning"]:
+            print(f"warning: {result['warning']}")
+    return 0
+
+
+def _session(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    state = _audit_state(config, vault.root)
+    if args.session_command == "recover":
+        changed = recover_incomplete(vault.root, config, agent=args.agent)
+        payload = {"changed_paths": list(changed)}
+    elif args.session_command == "access":
+        path = append_access_event(
+            state,
+            RetrievalContext(args.session_id, args.agent, args.model),
+            mode=args.mode,
+            query=args.query,
+            reason=args.reason,
+            concepts=args.concept,
+        )
+        payload = {"spooled": str(path)}
+    else:
+        source: dict[str, Any] = {"kind": "unavailable"}
+        trigger = "start" if args.session_command == "start" else "finalization"
+        event_kind = "session_start" if args.session_command == "start" else "finalize"
+        if args.session_command == "checkpoint":
+            event_kind = "finalize" if args.trigger == "finalization" else "checkpoint"
+            trigger = args.trigger
+            if args.summary_kind == "pi":
+                if not args.compaction_entry_id or not args.native_summary_file:
+                    raise ValueError("Pi checkpoints require entry ID and native summary file")
+                source = {
+                    "kind": "pi",
+                    "compaction_entry_id": args.compaction_entry_id,
+                    "summary": Path(args.native_summary_file).read_text(encoding="utf-8"),
+                }
+            elif args.summary_kind == "hermes-0.20.0":
+                source = {
+                    "kind": "hermes-0.20.0",
+                    "platform": args.platform,
+                    "session_id": args.session_id,
+                    "old_session_id": args.old_session_id,
+                    "in_place": args.in_place,
+                    "compression_count": args.compression_count,
+                    "previous_message_row_id": args.previous_message_row_id,
+                    "current_message_row_id": args.current_message_row_id,
+                    "candidate_row_id": args.candidate_row_id,
+                    "candidate_summary_sha256": args.candidate_summary_sha256,
+                }
+        descriptor = build_descriptor(
+            event_kind=event_kind,
+            agent=args.agent,
+            agent_version=args.agent_version,
+            session_id=args.session_id,
+            started_at=args.started_at,
+            trigger=trigger,
+            occurred_at=args.occurred_at or now_utc(),
+            state_dir=state,
+            summary_source=source,
+            native_event_id=args.native_event_id,
+            model=args.model,
+            platform=args.platform,
+            native_store_ref=args.native_store_ref,
+        )
+        path = publish_descriptor(
+            state,
+            descriptor,
+            timeout_ms=config["worker"]["publish_timeout_ms"],
+        )
+        payload = {"published": str(path), "event_id": descriptor["event_id"]}
+    if args.json_output:
+        _json(payload)
+    else:
+        print(next(iter(payload.values())))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not args.command:
@@ -715,6 +910,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     handlers = {
         "init": _init,
         "doctor": _doctor,
+        "worker": _worker,
+        "retry": _retry_lifecycle,
+        "install-lifecycle": _install_lifecycle,
+        "session": _session,
         "search": _search,
         "show": _show,
         "validate": _validate,

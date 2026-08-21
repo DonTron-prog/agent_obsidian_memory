@@ -1,0 +1,6 @@
+[Unit]
+Description=Drain Agent Memory lifecycle queue
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env memory --vault /home/donald/agent-memory worker --once

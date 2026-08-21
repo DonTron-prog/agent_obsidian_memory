@@ -4,11 +4,12 @@ A local-first, observable memory system shared by Pi and Hermes Agent. Durable k
 
 ## Status and documents
 
-The project is specified but not yet implemented.
+Milestones 1–5 are complete, including lifecycle checkpoints and the durable one-shot worker.
 
 - [Product specification](docs/product-specification.md) — **sole normative source; wins on conflict**
 - [Technical specification](docs/technical-specification.md) — derived architecture and contracts
 - [Implementation and validation plan](docs/implementation-plan.md) — derived delivery plan
+- [Lifecycle runbook](docs/lifecycle-runbook.md) — oneshot drain, retry, and recovery operations
 - [Main user stories](docs/user-stories.md) — informative outcomes
 - [Compatibility document](MEMORY_SYSTEM_SPECIFICATION.md) — navigation for the former specification path
 

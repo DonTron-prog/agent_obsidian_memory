@@ -1,0 +1,10 @@
+[Unit]
+Description=Activate Agent Memory lifecycle drain
+
+[Path]
+DirectoryNotEmpty=%h/.local/state/agent-memory/lifecycle/ready
+DirectoryNotEmpty=%h/.local/state/agent-memory/lifecycle/claimed
+Unit=agent-memory-lifecycle.service
+
+[Install]
+WantedBy=default.target

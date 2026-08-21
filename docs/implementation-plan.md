@@ -237,44 +237,46 @@ The user confirms that the product specification captures the intended system, i
 
 ## 9. Milestone 5 — Native-summary checkpoints and lifecycle drain
 
+**Status: Complete**
+
 ### Work
 
-1. Implement durable non-hidden lifecycle `ready/`, `claimed/`, and unwatched `failed/` descriptors with atomic publication and idempotent event identities.
-2. Implement `memory worker --once`: on every start acquire one worker lock, recover claimed descriptors first, then atomically claim and process ready descriptors one at a time until both are empty.
-3. Delete a descriptor only after committed materialization; make commit-before-delete replay safe by event ID. Run bounded capped-backoff retries in the same invocation, move exhausted work to `failed/`, and make `memory retry` republish it. Do not add a timer or leave delayed work in `ready/`.
-4. Keep only configurable `worker.state_dir`; derive non-hidden `ready/`, `claimed/`, and `failed/` beneath it. Render both resolved `DirectoryNotEmpty=` paths into the user's systemd `.path`, target the `Type=oneshot` service with `WantedBy=default.target`, run `systemctl --user daemon-reload`, and enable the path and user lingering; document next-login recovery when lingering is unavailable.
-5. Implement session file creation, stable paths, idempotent checkpoint append, and checkpoint index generation.
-6. Store Pi's exposed `compactionEntry.summary` and stable compaction entry ID. For Hermes gateway events, bind persisted previous/current message-row high-water boundaries and an unambiguous isolated-summary candidate row ID/SHA-256 at descriptor publication; include those values in the versioned canonical event ID.
-7. Make the Hermes worker fetch only the exact bounded candidate row, repeat Hermes 0.20.0 standalone/merged carrier isolation, verify row ID/hash, and store only the isolated segment. When classification, isolation, or verification fails, record lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, other dialogue/tool output, synthesized text, or another model.
-8. Materialize spooled context-access and lifecycle state at checkpoints and always on reset, `/new`, and finalization.
-9. Implement finalization, incomplete-session recovery, status transitions, `system/errors.md`, `system/status.md`, `memory retry`, and `memory doctor` checks. Doctor detects failed/start-limited lifecycle path/service units and stranded queue state. Apply the same secret rejection/redaction policy to descriptors, worker diagnostics, and error state, including lifecycle files outside Git.
+1. [x] Implement durable non-hidden lifecycle `ready/`, `claimed/`, and unwatched `failed/` descriptors with atomic publication and idempotent event identities.
+2. [x] Implement `memory worker --once`: on every start acquire one worker lock, recover claimed descriptors first, then atomically claim and process ready descriptors one at a time until both are empty.
+3. [x] Delete a descriptor only after committed materialization; make commit-before-delete replay safe by event ID. Run bounded capped-backoff retries in the same invocation, move exhausted work to `failed/`, and make `memory retry` republish it. Do not add a timer or leave delayed work in `ready/`.
+4. [x] Keep only configurable `worker.state_dir`; derive non-hidden `ready/`, `claimed/`, and `failed/` beneath it. Render both resolved `DirectoryNotEmpty=` paths into the user's systemd `.path`, target the `Type=oneshot` service with `WantedBy=default.target`, run `systemctl --user daemon-reload`, and enable the path and user lingering; document next-login recovery when lingering is unavailable.
+5. [x] Implement session file creation, stable paths, idempotent checkpoint append, and checkpoint index generation.
+6. [x] Store Pi's exposed `compactionEntry.summary` and stable compaction entry ID. For Hermes gateway events, bind persisted previous/current message-row high-water boundaries and an unambiguous isolated-summary candidate row ID/SHA-256 at descriptor publication; include those values in the versioned canonical event ID.
+7. [x] Make the Hermes worker fetch only the exact bounded candidate row, repeat Hermes 0.20.0 standalone/merged carrier isolation, verify row ID/hash, and store only the isolated segment. When classification, isolation, or verification fails, record lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, other dialogue/tool output, synthesized text, or another model.
+8. [x] Materialize spooled context-access and lifecycle state at checkpoints and always on reset, `/new`, and finalization.
+9. [x] Implement finalization, incomplete-session recovery, status transitions, `system/errors.md`, `system/status.md`, `memory retry`, and `memory doctor` checks. Doctor detects failed/start-limited lifecycle path/service units and stranded queue state. Apply the same secret rejection/redaction policy to descriptors, worker diagnostics, and error state, including lifecycle files outside Git.
 
 ### Tests
 
-- one session ID maps to one evolving file;
-- repeated native summaries append ordered checkpoints;
-- duplicate event ID is a no-op;
-- atomic ready-to-claimed handling and one worker lock prevent duplicate concurrent drains;
-- a post-claim crash leaves recoverable work in `claimed/`, and the next invocation processes it before `ready/`;
-- a commit-before-descriptor-delete crash replays as an idempotent no-op and then deletes the descriptor;
-- `memory worker --once` drains claimed and ready backlog and exits;
-- retryable work exhausts bounded capped backoff in the same invocation, moves to unwatched `failed/`, and is republished only by `memory retry`;
-- failed descriptors remain sanitized and diagnosable without reactivating the path unit;
-- configuration exposes only `worker.state_dir`; queue paths are derived, and installation renders both resolved `DirectoryNotEmpty=` values, runs daemon-reload, targets the oneshot service, and activates on each non-empty backlog;
-- enabled user lingering recovers backlog after reboot without login, while disabled lingering recovers it at next login;
-- repeated hard worker crashes trigger systemd start-limit failure; `memory doctor` reports the failed path/service state and stranded queue, and recovery with `systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service` followed by `systemctl --user enable --now agent-memory-lifecycle.path` resumes draining after the crash is fixed;
-- Pi's exposed native summary/stable entry ID and Hermes's publication-bound boundaries/candidate row ID/isolated-segment hash are stored without a model call;
-- absent, ambiguous, or hash-mismatched native summary produces lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, or other dialogue/tool output;
-- access events are durable before checkpoint commit and materialize on checkpoint, reset, `/new`, and finalization;
-- a handler that completes descriptor publication permits recovery after immediate host termination; a handler that never runs is not claimed recoverable;
-- managed writes reject secret-bearing filenames/content, and lifecycle descriptors, worker diagnostics, notifications, and `system/errors.md` redact secrets and raw prompts in both vault and outside-Git state;
-- materialization failure never blocks the caller;
-- editing completed checkpoint text preserves its anchor and Git retains the prior version; and
-- no raw transcript is written to the vault.
+- [x] one session ID maps to one evolving file;
+- [x] repeated native summaries append ordered checkpoints;
+- [x] duplicate event ID is a no-op;
+- [x] atomic ready-to-claimed handling and one worker lock prevent duplicate concurrent drains;
+- [x] a post-claim crash leaves recoverable work in `claimed/`, and the next invocation processes it before `ready/`;
+- [x] a commit-before-descriptor-delete crash replays as an idempotent no-op and then deletes the descriptor;
+- [x] `memory worker --once` drains claimed and ready backlog and exits;
+- [x] retryable work exhausts bounded capped backoff in the same invocation, moves to unwatched `failed/`, and is republished only by `memory retry`;
+- [x] failed descriptors remain sanitized and diagnosable without reactivating the path unit;
+- [x] configuration exposes only `worker.state_dir`; queue paths are derived, and installation renders both resolved `DirectoryNotEmpty=` values, runs daemon-reload, targets the oneshot service, and activates on each non-empty backlog;
+- [x] enabled user lingering recovers backlog after reboot without login, while disabled lingering recovers it at next login;
+- [x] repeated hard worker crashes trigger systemd start-limit failure; `memory doctor` reports the failed path/service state and stranded queue, and recovery with `systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service` followed by `systemctl --user enable --now agent-memory-lifecycle.path` resumes draining after the crash is fixed;
+- [x] Pi's exposed native summary/stable entry ID and Hermes's publication-bound boundaries/candidate row ID/isolated-segment hash are stored without a model call;
+- [x] absent, ambiguous, or hash-mismatched native summary produces lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, or other dialogue/tool output;
+- [x] access events are durable before checkpoint commit and materialize on checkpoint, reset, `/new`, and finalization;
+- [x] a handler that completes descriptor publication permits recovery after immediate host termination; a handler that never runs is not claimed recoverable;
+- [x] managed writes reject secret-bearing filenames/content, and lifecycle descriptors, worker diagnostics, notifications, and `system/errors.md` redact secrets and raw prompts in both vault and outside-Git state;
+- [x] materialization failure never blocks the caller;
+- [x] editing completed checkpoint text preserves its anchor and Git retains the prior version; and
+- [x] no raw transcript is written to the vault.
 
 ### Gate
 
-A synthetic session completes publication of native-summary and finalization descriptors, terminates immediately, and is drained by the dual-directory systemd-triggered `memory worker --once` into one readable Markdown file with indexed checkpoints and context access. Post-claim and commit-before-delete crash recovery pass. Exhausted work lands in sanitized unwatched failed state and succeeds only after `memory retry`. A descriptor without a resolvable native summary records `native summary unavailable`; no second model call, raw dialogue, `pre_llm_call` history, or routine tool dump occurs.
+- [x] A synthetic session completes publication of native-summary and finalization descriptors, terminates immediately, and is drained by the dual-directory systemd-triggered `memory worker --once` into one readable Markdown file with indexed checkpoints and context access. Post-claim and commit-before-delete crash recovery pass. Exhausted work lands in sanitized unwatched failed state and succeeds only after `memory retry`. A descriptor without a resolvable native summary records `native summary unavailable`; no second model call, raw dialogue, `pre_llm_call` history, or routine tool dump occurs.
 
 ## 10. Milestone 6 — Pi adapter
 

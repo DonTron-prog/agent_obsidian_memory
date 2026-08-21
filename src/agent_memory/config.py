@@ -35,6 +35,32 @@ class ConfigError(ValueError):
     """Raised for an invalid configuration document."""
 
 
+def validate_local_state_dir(state_dir: str | Path) -> Path:
+    """Require local lifecycle state outside every Git worktree or repository."""
+
+    state = Path(state_dir).expanduser().resolve(strict=False)
+    for parent in (state, *state.parents):
+        dot_git = parent / ".git"
+        bare = (parent / "HEAD").is_file() and (parent / "objects").is_dir()
+        if dot_git.exists() or dot_git.is_symlink() or bare:
+            raise ConfigError("worker.state_dir must be outside every Git worktree/repository")
+    return state
+
+
+def validate_worker_state_dir(state_dir: str | Path, vault: str | Path) -> Path:
+    """Require lifecycle state outside the vault and every Git worktree."""
+
+    state = Path(state_dir).expanduser().resolve(strict=False)
+    vault_root = Path(vault).expanduser().resolve(strict=False)
+    try:
+        state.relative_to(vault_root)
+    except ValueError:
+        pass
+    else:
+        raise ConfigError("worker.state_dir must be outside the synchronized vault")
+    return validate_local_state_dir(state)
+
+
 def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -75,6 +101,14 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             loaded = {}
         if not isinstance(loaded, dict):
             raise ConfigError("configuration root must be a mapping")
+        worker = loaded.get("worker", {})
+        if isinstance(worker, dict):
+            forbidden = {"ready_dir", "claimed_dir", "failed_dir"} & worker.keys()
+            if forbidden:
+                raise ConfigError(
+                    "worker queue paths are derived from worker.state_dir: "
+                    + ", ".join(sorted(forbidden))
+                )
         config = _merge(config, loaded)
 
     config["vault"] = _resolved_path(config["vault"], base)
@@ -83,6 +117,9 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
         if not isinstance(value, dict) or "state_dir" not in value:
             raise ConfigError(f"{section}.state_dir is required")
         value["state_dir"] = _resolved_path(value["state_dir"], base)
+    publish_timeout_ms = config["worker"].get("publish_timeout_ms")
+    if type(publish_timeout_ms) is not int or publish_timeout_ms < 0:
+        raise ConfigError("worker.publish_timeout_ms must be a non-negative integer")
 
     notifications = config.get("notifications")
     if not isinstance(notifications, dict) or "errors_file" not in notifications:
@@ -90,4 +127,5 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     notifications["errors_file"] = _resolved_path(
         notifications["errors_file"], Path(config["vault"])
     )
+    validate_worker_state_dir(config["worker"]["state_dir"], config["vault"])
     return config

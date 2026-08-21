@@ -113,6 +113,16 @@ class Session:
         for key in required[:6] + ("summary_policy",):
             if not isinstance(value[key], str) or not value[key].strip():
                 raise ValueError(f"{key} must be a non-empty string")
+        if value["agent"] not in {"pi", "hermes"}:
+            raise ValueError("session agent must be pi or hermes")
+        if value["status"] not in {"active", "closed", "incomplete"}:
+            raise ValueError("session status is invalid")
+        if value["summary_policy"] != "native-only":
+            raise ValueError("session summary_policy must be native-only")
+        import re
+
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", value["session_id"]):
+            raise ValueError("session_id is unsafe")
         if not isinstance(value["checkpoint_count"], int) or value["checkpoint_count"] < 0:
             raise ValueError("checkpoint_count must be a non-negative integer")
         models = value["host_models"]
@@ -120,6 +130,12 @@ class Session:
             isinstance(model, str) and model.strip() for model in models
         ):
             raise ValueError("host_models must be a list of non-empty strings")
+        if len(set(models)) != len(models):
+            raise ValueError("host_models must not contain duplicates")
+        if value.get("native_store_ref") is not None and not isinstance(
+            value["native_store_ref"], str
+        ):
+            raise ValueError("native_store_ref must be text when present")
         known = {*required, "native_store_ref"}
         return cls(
             agent=value["agent"],
