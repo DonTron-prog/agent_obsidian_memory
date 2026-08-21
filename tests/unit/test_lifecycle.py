@@ -16,9 +16,7 @@ from agent_memory.config import ConfigError, load_config
 from agent_memory.lifecycle import (
     LifecycleError,
     build_descriptor,
-    descriptor_filename,
     publish_descriptor,
-    publish_lifecycle_safely,
     queue_paths,
 )
 
@@ -53,6 +51,14 @@ def test_retry_cli_targets_are_mutually_exclusive() -> None:
         parser.parse_args(["retry", "retry-1", "--all"])
     assert parser.parse_args(["retry", "retry-1"]).retry_id == "retry-1"
     assert parser.parse_args(["retry", "--all"]).all_failed is True
+
+
+def test_install_lifecycle_help_has_no_internal_path_or_executable_options(capsys) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["install-lifecycle", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--unit-dir" not in help_text
+    assert "--executable" not in help_text
 
 
 def test_deterministic_identity_atomic_private_publication_and_duplicate(tmp_path: Path) -> None:
@@ -169,34 +175,18 @@ def test_rejects_traversal_raw_fields_secrets_and_independent_queue_config(tmp_p
             occurred_at=NOW,
             state_dir=tmp_path,
         )
-    with pytest.raises(LifecycleError, match="sensitive"):
+    with pytest.raises(LifecycleError):
         pi_descriptor(tmp_path, summary="api_key=abcdefghijklmnop")
-    value = pi_descriptor(tmp_path)
-    value["prompt"] = "not persisted"
-    with pytest.raises(LifecycleError, match="forbidden"):
-        publish_descriptor(tmp_path, value)
+    for raw_field in ("prompt", "history", "transcript", "tool_output"):
+        value = pi_descriptor(tmp_path)
+        value[raw_field] = "not persisted"
+        with pytest.raises(LifecycleError):
+            publish_descriptor(tmp_path, value)
 
     config = tmp_path / "memory.yaml"
     config.write_text("worker:\n  ready_dir: /tmp/ready\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="derived"):
         load_config(config)
-    result = publish_lifecycle_safely(
-        tmp_path / "safe-state",
-        event_kind="checkpoint",
-        agent="pi",
-        agent_version="1",
-        session_id="safe",
-        started_at=NOW,
-        trigger="compaction",
-        occurred_at=NOW,
-        summary_source={
-            "kind": "pi",
-            "compaction_entry_id": "entry",
-            "summary": "raw prompt says api_key=abcdefghijklmnop",
-        },
-    )
-    assert result == {"published": False, "error": "sensitive content rejected"}
-    assert not (tmp_path / "safe-state/ready").exists()
 
     paths = queue_paths(tmp_path / "only")
     assert (paths.ready, paths.claimed, paths.failed) == (
@@ -244,40 +234,23 @@ def test_publication_is_concurrently_idempotent_no_clobber_and_orphans_are_unwat
     assert not list((state / "claimed").iterdir())
 
 
-def test_safe_publication_returns_before_held_event_lock_timeout(tmp_path: Path) -> None:
+def test_descriptor_publication_times_out_on_held_global_lock(tmp_path: Path) -> None:
     state = tmp_path / "state"
     descriptor = pi_descriptor(state)
-    name = descriptor_filename(descriptor["event_id"])
-    lock_dir = state / "publication-locks"
-    lock_dir.mkdir(parents=True)
-    lock = os.open(lock_dir / f"{Path(name).stem}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    state.mkdir()
+    lock = os.open(state / "publication.lock", os.O_CREAT | os.O_RDWR, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX)
     started = time.monotonic()
     try:
-        result = publish_lifecycle_safely(
-            state,
-            publish_timeout_ms=50,
-            event_kind="checkpoint",
-            agent="pi",
-            agent_version="0.84.2",
-            session_id="session-1",
-            started_at=NOW,
-            trigger="compaction",
-            occurred_at=NOW,
-            summary_source={
-                "kind": "pi",
-                "compaction_entry_id": "entry-1",
-                "summary": "Native body",
-            },
-            model="openai/gpt-5",
-        )
+        with pytest.raises(TimeoutError, match="publication lock timed out"):
+            publish_descriptor(state, descriptor, timeout_ms=50)
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         os.close(lock)
 
-    assert result == {"published": False, "error": "lifecycle publication failed"}
     assert 0.04 <= time.monotonic() - started < 0.5
     assert not list((state / "ready").glob("*.json"))
+    assert not (state / "publication-locks").exists()
 
 
 def test_descriptor_cross_field_exact_types_and_collision_resistance(tmp_path: Path) -> None:

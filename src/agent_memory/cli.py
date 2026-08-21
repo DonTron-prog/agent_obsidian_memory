@@ -130,8 +130,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_location(retry)
 
     install = commands.add_parser("install-lifecycle", help="install systemd user lifecycle units")
-    install.add_argument("--unit-dir")
-    install.add_argument("--executable", default="memory")
     install.add_argument("--json", action="store_true", dest="json_output")
     _add_location(install)
 
@@ -816,8 +814,6 @@ def _install_lifecycle(args: argparse.Namespace) -> int:
     config_path = _selected_config_path(args)
     result = install_units(
         config["worker"]["state_dir"],
-        unit_dir=args.unit_dir,
-        executable=args.executable,
         config_path=config_path,
         vault=vault.root,
     )

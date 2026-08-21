@@ -63,6 +63,18 @@ def test_doctor_quarantines_malformed_failed_json_and_redacts_retry_ids(
         ),
         encoding="utf-8",
     )
+    (state / "worker.lock").write_text(
+        json.dumps(
+            {
+                "pid": 123,
+                "command": {"api_key": "abcdefghijklmnop"},
+                "actor": "access_token=abcdefghijklmnop",
+                "acquired_at": "2026-01-02T03:04:05Z",
+                "hostile_unknown": secret,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def runner(argv):
         if argv[:3] == ["systemctl", "--user", "show"]:
@@ -78,6 +90,11 @@ def test_doctor_quarantines_malformed_failed_json_and_redacts_retry_ids(
     rendered = json.dumps(report)
     assert report["queues"]["failed"]["malformed"] == ["list.json"]
     assert report["queues"]["failed"]["ids"] == ["[redacted sensitive content]"]
+    assert report["worker_lock_owner"] == {
+        "pid": 123,
+        "actor": "[redacted sensitive content]",
+        "acquired_at": "2026-01-02T03:04:05Z",
+    }
     assert "abcdefghijklmnop" not in rendered
 
 

@@ -146,12 +146,14 @@ def _show(runner: Runner, unit: str) -> dict[str, str]:
     return values
 
 
-def _redacted_tree(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _redacted_tree(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redacted_tree(item) for item in value]
-    return redact_sensitive_text(value) if isinstance(value, str) else value
+def _redacted_lock_owner(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"state": "unreadable"}
+    return {
+        key: item if type(item) is int else redact_sensitive_text(item)
+        for key in ("pid", "command", "actor", "acquired_at")
+        if isinstance(item := value.get(key), str) or key == "pid" and type(item) is int
+    }
 
 
 def lifecycle_health(
@@ -223,7 +225,7 @@ def lifecycle_health(
     lock_owner = None
     if paths.lock.is_file() and paths.lock.stat().st_size:
         try:
-            lock_owner = _redacted_tree(json.loads(paths.lock.read_text(encoding="utf-8")))
+            lock_owner = _redacted_lock_owner(json.loads(paths.lock.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             lock_owner = {"state": "unreadable"}
     return {

@@ -11,8 +11,8 @@ from typing import Any
 
 from agent_memory.lifecycle import (
     LifecycleError,
-    _event_lock,
     _fsync_directory,
+    _publication_lock,
     _publish_payload,
     _write_atomic,
     canonical_json,
@@ -280,7 +280,7 @@ def retry_failed(
                 continue
             target = paths.ready / descriptor_filename(value["event_id"])
             payload = canonical_json(value) + b"\n"
-            with _event_lock(paths.root, target.name):
+            with _publication_lock(paths.root):
                 if target.exists() and target.read_bytes() != payload:
                     raise WorkerError("ready descriptor conflicts with failed retry")
                 if not target.exists():

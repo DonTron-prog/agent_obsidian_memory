@@ -19,7 +19,7 @@ from typing import Any
 
 from agent_memory.audit import capture_offset
 from agent_memory.config import validate_local_state_dir
-from agent_memory.secrets import SecretError, contains_secret, reject_secret_content
+from agent_memory.secrets import contains_secret
 
 SCHEMA = "agent-memory.lifecycle/v1"
 UNAVAILABLE = "native summary unavailable"
@@ -27,18 +27,6 @@ SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 EVENT_ID = re.compile(r"^(?:session_start|checkpoint|finalize):v1:[0-9a-f]{64}$")
 HEX = re.compile(r"^[0-9a-f]{64}$")
 MODEL = re.compile(r"^[^/\s]+(?:/[^/\s]+)+$")
-FORBIDDEN_KEYS = {
-    "prompt",
-    "history",
-    "messages",
-    "transcript",
-    "tool_output",
-    "tool_outputs",
-    "conversation",
-    "dialogue",
-    "preserved_tail",
-    "pre_llm_call",
-}
 
 
 class LifecycleError(ValueError):
@@ -114,19 +102,6 @@ def _utc(value: object, name: str) -> str:
     return text
 
 
-def _safe_tree(value: object) -> None:
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            if not isinstance(key, str) or key.casefold() in FORBIDDEN_KEYS:
-                raise LifecycleError("descriptor contains a forbidden raw-content field")
-            _safe_tree(item)
-    elif isinstance(value, list):
-        for item in value:
-            _safe_tree(item)
-    elif isinstance(value, str) and contains_secret(value):
-        raise LifecycleError("descriptor contains sensitive content")
-
-
 def _identity(descriptor: Mapping[str, Any]) -> dict[str, Any]:
     session = descriptor["session"]
     source = descriptor["summary_source"]
@@ -170,7 +145,6 @@ def _identity(descriptor: Mapping[str, Any]) -> dict[str, Any]:
 def validate_descriptor(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LifecycleError("descriptor must be a mapping")
-    _safe_tree(value)
     allowed = {
         "schema",
         "event_id",
@@ -336,10 +310,8 @@ def validate_descriptor(value: object) -> dict[str, Any]:
     expected = f"{event_kind}:v1:{_hash(_identity(value))}"
     if value.get("event_id") != expected or not EVENT_ID.fullmatch(expected):
         raise LifecycleError("event_id does not match the canonical identity")
-    try:
-        reject_secret_content(canonical_json(value).decode(), path="lifecycle descriptor")
-    except SecretError as exc:
-        raise LifecycleError("descriptor contains sensitive content") from exc
+    if contains_secret(canonical_json(value).decode()):
+        raise LifecycleError("descriptor contains sensitive content")
     return value
 
 
@@ -385,27 +357,6 @@ def build_descriptor(
     return validate_descriptor(value)
 
 
-def publish_lifecycle_safely(
-    state_dir: str | Path,
-    *,
-    publish_timeout_ms: int = 250,
-    **descriptor_options: Any,
-) -> dict[str, Any]:
-    """Attempt build/publication without propagating failure into a native caller."""
-
-    try:
-        descriptor = build_descriptor(state_dir=state_dir, **descriptor_options)
-        path = publish_descriptor(state_dir, descriptor, timeout_ms=publish_timeout_ms)
-        return {"published": True, "event_id": descriptor["event_id"], "path": str(path)}
-    except Exception as exc:
-        return {
-            "published": False,
-            "error": "sensitive content rejected"
-            if isinstance(exc, SecretError | LifecycleError)
-            else "lifecycle publication failed",
-        }
-
-
 def descriptor_filename(event_id: str) -> str:
     return f"{hashlib.sha256(event_id.encode()).hexdigest()}.json"
 
@@ -440,13 +391,10 @@ def _write_atomic(path: Path, payload: bytes) -> None:
 
 
 @contextmanager
-def _event_lock(root: Path, name: str, *, timeout_ms: int | None = None) -> Iterator[None]:
-    directory = root / "publication-locks"
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(directory, 0o700)
-    lock_path = directory / f"{Path(name).stem}.lock"
+def _publication_lock(root: Path, *, timeout_ms: int | None = None) -> Iterator[None]:
+    # ponytail: one global lock is the MVP ceiling; restore finer locks if throughput matters.
     descriptor = os.open(
-        lock_path,
+        root / "publication.lock",
         os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
         0o600,
     )
@@ -526,7 +474,7 @@ def publish_descriptor(
     paths = queue_paths(state_dir, create=True)
     name = descriptor_filename(value["event_id"])
     payload = canonical_json(value) + b"\n"
-    with _event_lock(paths.root, name, timeout_ms=timeout_ms):
+    with _publication_lock(paths.root, timeout_ms=timeout_ms):
         for directory in (paths.ready, paths.claimed, paths.failed):
             existing = directory / name
             if existing.exists():
@@ -550,7 +498,7 @@ def publish_descriptor(
 
 def claim_descriptor(paths: QueuePaths, ready: Path) -> Path:
     target = paths.claimed / ready.name
-    with _event_lock(paths.root, ready.name):
+    with _publication_lock(paths.root):
         if target.exists():
             if read_descriptor(target) != read_descriptor(ready):
                 raise LifecycleError("claimed event conflicts with ready event")
@@ -566,7 +514,7 @@ def claim_descriptor(paths: QueuePaths, ready: Path) -> Path:
 def delete_fsynced(path: Path) -> None:
     parent = path.parent
     if parent.name in {"ready", "claimed", "failed"} and path.suffix == ".json":
-        with _event_lock(parent.parent, path.name):
+        with _publication_lock(parent.parent):
             path.unlink(missing_ok=True)
             _fsync_directory(parent)
     else:
