@@ -10,13 +10,13 @@
 - **Runtime vault:** `/home/donald/agent-memory`
 - **Knowledge format:** Open Knowledge Format (OKF) v0.2
 
-This specification records the product decisions established during requirements discovery. Normative words such as **MUST**, **SHOULD**, and **MAY** are used in their usual requirements sense.
+This is the sole normative project document. `README.md`, `MEMORY_SYSTEM_SPECIFICATION.md`, and the other documents under `docs/` are derived or informative; this product specification wins on any conflict. Normative words such as **MUST**, **SHOULD**, and **MAY** are used in their usual requirements sense.
 
 ## 2. Problem statement
 
 Pi and Hermes are stateless across fresh contexts unless relevant information is supplied again. Similar work therefore requires repeated explanations of project locations, preferences, prior decisions, people, procedures, and task history. Existing memory products did not satisfy the use case because their memories were difficult to inspect or correct, their injection behavior was unclear, or their storage ontology did not match the user's mental model.
 
-The required system is a local-first memory layer that remains legible as ordinary Markdown. It must provide just-in-time context without silently constructing an opaque user model, and it must become more useful as recurring work is captured, refined, and eventually promoted into reusable skills.
+The required system is a local-first memory layer that remains legible as ordinary Markdown. It must provide just-in-time context without silently constructing an opaque user model, and it must become more useful as durable knowledge is explicitly captured and refined.
 
 ## 3. Product principles
 
@@ -40,9 +40,9 @@ A compact root index is supplied at the start of a new agent session. Agents the
 
 Each memory represents one self-contained concept and remains concise. Existing concepts are updated in place when facts change. Incorrect or obsolete concepts are removed from the active corpus rather than retained as conflicting alternatives. Git preserves recoverability.
 
-### 3.6 Learning follows evidence
+### 3.6 Procedures remain ordinary concepts
 
-A lightweight procedure begins as an OKF concept. It becomes an executable `SKILL.md` only after at least three successful uses, stable steps, and a clear verification method. This prevents speculative procedures from producing skill sprawl.
+A Procedure is an ordinary OKF concept in the MVP. Procedure-use tracking and conversion to executable skills require a later, separately approved design.
 
 ## 4. Goals
 
@@ -53,13 +53,12 @@ The MVP must:
 3. allow agents to create and update concepts proactively without an approval gate;
 4. record authorship, exact model identity, source provenance, and managed changes;
 5. make retrieval observable at the session level;
-6. create concise, evolving session summaries on compaction, reset, and session termination;
-7. expose selected Pi and Hermes files in the same vault while respecting their native formats;
-8. support direct Obsidian editing through an explicit reconciliation workflow;
-9. protect user edits and synchronization conflicts from accidental overwrites;
-10. preserve complete local Git history for managed concepts and summaries, with manual pushes to a private remote for backup;
-11. synchronize changes to a local Obsidian vault through Syncthing; and
-12. establish an end-to-end validation baseline before adaptive or semantic features are added.
+6. preserve native Pi compaction summaries and safely resolved native Hermes compression summaries as concise, evolving session checkpoints;
+7. support direct Obsidian editing through an explicit reconciliation workflow;
+8. protect user edits and synchronization conflicts from accidental overwrites;
+9. preserve complete local Git history for managed concepts and summaries, with manual pushes to a private remote for backup;
+10. synchronize changes to a local Obsidian vault through Syncthing; and
+11. establish an end-to-end validation baseline before adaptive or semantic features are added.
 
 ## 5. Non-goals for the MVP
 
@@ -74,7 +73,10 @@ The MVP does not:
 - watch all Obsidian edits continuously;
 - automatically summarize native Hermes edits to `MEMORY.md` or `USER.md` in the OKF log;
 - manage Pi extensions, Pi prompt templates, Hermes plugins, or Hermes hooks as vault content;
-- perform agent-file, configuration, or skill migration; establish symlinks or native-path cutover; or migrate prior Honcho or Open Second Brain memories;
+- copy or manage agent files or create `agents/` or `skills/` vault directories;
+- perform agent-file, configuration, or skill migration, snapshots, symlink or native-path cutover, or prior Honcho/Open Second Brain migration;
+- record procedure-use events or counters, evaluate promotion eligibility, generate `SKILL.md`, manage skill directories, or change skill load paths;
+- automatically extract reusable knowledge from sessions; agents may still explicitly create or update durable concepts during normal turns;
 - automatically push Git commits or require remote availability for local writes;
 - pause Syncthing through its REST API;
 - treat Syncthing as a backup system; or
@@ -155,13 +157,13 @@ Tasks store daily or scheduled task information only. The memory system does not
 
 ### 7.5 Relations
 
-The MVP uses standard Markdown links. Link meaning is expressed by surrounding prose, in accordance with OKF v0.2. Typed relation metadata is deferred. Concepts may link to files outside the conformant OKF bundle, including skills, agent files, and session summaries. Those files need not link back.
+The MVP uses standard Markdown links. Link meaning is expressed by surrounding prose, in accordance with OKF v0.2. Typed relation metadata is deferred. Concepts may link to session summaries or other files outside the conformant OKF bundle; those files need not link back.
 
 ## 8. Memory lifecycle
 
 ### 8.1 Creation
 
-Agents may create concepts proactively. Before creation, the agent and CLI must search for existing or similar concepts. An existing concept is updated when the knowledge belongs there. A distinct concept receives a distinct filename and title.
+Agents may create concepts proactively. Before creation, the agent and CLI must search for existing candidates. The CLI rejects an exact slug or exact normalized-title duplicate. Ordinary deterministic search results guide whether an existing concept should be updated; the MVP has no fuzzy similarity threshold or confirmation override. A distinct concept receives a distinct filename and title.
 
 ### 8.2 Update
 
@@ -187,18 +189,9 @@ Trust presentation follows OKF v0.2: no `verified` field is **unverified**, veri
 
 Incorrect or obsolete concepts are deleted from the active bundle. Routine completed tasks are also deleted. The managed log records the deletion, and Git retains the recoverable history. OKF `deprecated` status is reserved for rare cases where a historical concept must remain linkable.
 
-### 8.6 Procedure promotion
+### 8.6 Deferred procedure-to-skill pipeline
 
-A procedure is promoted automatically when:
-
-1. at least three successful use events are recorded;
-2. its sequence of steps is stable;
-3. it has a clear verification method; and
-4. the target agent compatibility is known.
-
-Each use event stores only its timestamp, outcome, and source checkpoint. The successful-use count is derived from the event list; actor, model, and detailed context remain available through the checkpoint.
-
-Skills are placed in `shared` by default, otherwise in `pi-only` or `hermes-only`. The resulting skill follows the Agent Skills `SKILL.md` format, not OKF. After promotion, the source concept remains `type: Procedure`, retains its use history and provenance, links to the skill, and is shortened so it does not duplicate the complete executable instructions.
+Procedures remain ordinary concepts in the MVP. Procedure-use events, success counters, eligibility evaluation, automatic promotion, generated `SKILL.md` packages, skill-directory management, and load-path work are deferred in full.
 
 ## 9. Retrieval behavior
 
@@ -245,67 +238,37 @@ A checkpoint is created:
 - when an active session is otherwise finalized or terminated; and
 - when an equivalent native lifecycle event is available.
 
-Repeated compactions append checkpoints to the same file. Events are idempotent so retries do not duplicate checkpoints. Completed checkpoint text may be edited, but anchors should remain stable and Git preserves prior versions. Hermes gateway and Telegram compression is checkpointed immediately; Hermes CLI compression is incorporated at reset or finalization as defined in Section 18.
+Repeated compactions append checkpoints to the same file. Events are idempotent so retries do not duplicate checkpoints. Completed checkpoint text may be edited, but anchors should remain stable and Git preserves prior versions. A Pi `session_compact` descriptor may contain `compactionEntry.summary` and the stable compaction entry ID exposed by Pi. A Hermes gateway or Telegram `session:compress` event is only a committed-compression signal; its handling and Hermes CLI reset/finalization behavior are defined in Section 18.
 
-### 10.3 Summary content
+### 10.3 Checkpoint content
 
-Each session summary contains:
+A checkpoint stores the native Pi summary exposed by `session_compact`, or the single classified native compacted-summary message safely resolved for a Hermes gateway compression, unchanged in meaning. It also stores available host provenance: agent and version, exact active model when exposed by a separate reliable host context, session and native event identifiers, trigger, and timestamp. The session file materializes pending context-access audit and lifecycle state.
 
-- objective;
-- essential context;
-- decisions and rationale;
-- actions and outcomes;
-- files changed;
-- memories or skills created or updated;
-- unresolved items and next steps;
-- checkpoint timestamps; and
-- context-access audit.
+For Hermes gateway compression, summary resolution MUST be bound when the committed-compression hook publishes its descriptor, not inferred later from `compression_count`. Under the persisted adapter-state lock, the hook reads only the message row ID, Hermes summary-classification metadata, and content needed to inspect rows after the persisted previous message-row high-water boundary through the current high-water boundary. The hook atomically publishes a descriptor with the five exposed lineage fields, both boundaries, and, only when exactly one native summary segment is unambiguously isolated, that candidate row ID and the SHA-256 hash of the isolated segment. It contains neither summary text nor raw conversation. Its versioned canonical event ID hashes all of those fields, including both boundaries and the nullable candidate row/hash, so multiple queued in-place compressions and a restart that resets `compression_count` remain distinct. The hook persists the current boundary and old/new lineage before returning. Within one logical lineage, the worker materializes queued Hermes descriptors in ascending message-row boundary order so their distinct event IDs become ordered checkpoints.
 
-Raw dialogue and routine tool output are excluded. Tool output appears only when essential to understanding an outcome, error, or decision.
+`memory worker --once` MUST use the descriptor's exact bounded candidate row, re-isolate the native summary segment, and verify both row ID and SHA-256 hash before storing only that segment. Candidate metadata may be inspected for classification, but non-summary rows and preserved conversation content MUST NOT be serialized into a descriptor, diagnostic, or checkpoint. Hermes 0.20.0 isolation accepts only a recognized standalone or merged summary carrier with exactly one unambiguous segment delimited according to that version's recognized summary prefix, merged delimiter when present, and summary end marker. The isolated segment is the native summary body after the recognized prefix and before its matching end marker, and its UTF-8 bytes are the hash input. A standalone carrier may contain only that framing/segment plus permitted surrounding whitespace; in a merged carrier, the recognized delimiter must uniquely separate preserved tail or live user content from the framed summary, and all content outside the isolated body is excluded. Missing, repeated, misordered, or conflicting markers, multiple candidate carriers, a changed row, or a hash mismatch result in available lifecycle metadata and the literal status `native summary unavailable`.
 
-### 10.4 Model policy
+The memory system MUST NOT run a second LLM summarization pass, configure an active or dedicated summarizer model, synthesize a replacement, or copy raw dialogue or routine tool output into the vault.
 
-The active session provider/model is used for summarization by default. The provider and model may change between sessions and must be configurable. Every generated checkpoint records the exact summarizer `provider/model-id`.
+### 10.4 Explicit knowledge capture
 
-### 10.5 Knowledge extraction
+Automatic reusable-knowledge extraction is deferred. During normal turns, agents may still explicitly create or update a durable concept through the ordinary validated transaction path.
 
-Automatic reusable-knowledge extraction runs at compaction, reset, or finalization rather than after every turn. Agents may still create memories during a turn when the durable value is already clear. Extracted candidates pass through duplicate detection and normal CLI validation before mutation.
+### 10.5 Lifecycle worker and failure behavior
 
-### 10.6 Failure behavior
+Adapters atomically publish sanitized, idempotent lifecycle descriptors to a durable non-hidden `ready/` directory and return within a fixed timeout. Durability after abrupt agent exit begins only when atomic descriptor publication completes; the system does not promise recovery when the lifecycle handler never ran or publication did not complete. Reset, `/new`, and finalization descriptors always request materialization of pending access audit and lifecycle state, whether or not a native summary is available.
 
-Summary, extraction, or automatic-promotion failure must not block compaction, reset, `/new`, or exit. Lifecycle adapters synchronously enqueue a sanitized, idempotent event descriptor to durable local state and return within a fixed timeout. A supervised worker performs model and Git work afterward. Failures are reported through the available interface, `system/errors.md`, and the next agent turn when immediate notification is unavailable.
+On every start, `memory worker --once` acquires one worker lock, recovers descriptors already in the non-hidden `claimed/` directory first, then atomically claims and processes `ready/` descriptors one at a time until both directories are empty. A crash after a checkpoint transaction commits but before descriptor deletion is replayed safely by event-id idempotency. Retryable work receives bounded retries with capped backoff inside the same oneshot invocation; exhausted work moves atomically to an unwatched `failed/` directory. No delayed retry remains in watched `ready/`, and no timer or application daemon is used. `memory retry` atomically republishes selected failed work to `ready/`.
 
-## 11. Agent-specific files
+`worker.state_dir` is the only configurable worker-state directory; non-hidden `ready/`, `claimed/`, and `failed/` paths are derived beneath it. One systemd user `.path` unit uses `DirectoryNotEmpty=` for the resolved `ready/` and `claimed/` paths, names the `Type=oneshot` service as its target, and has `WantedBy=default.target`. Installation renders both resolved paths into the user's `.path` unit, runs `systemctl --user daemon-reload`, enables the path unit, and enables user lingering so queue recovery can run after boot without login; without lingering, recovery occurs at the next user login. The service runs `memory worker --once`.
 
-### 11.1 MVP copy boundary
+Lifecycle callback and worker failures never block compaction, reset, `/new`, finalization, or exit. Failures are reported through the available interface, `system/errors.md`, and the next agent turn when immediate notification is unavailable. `memory doctor` detects failed path/service units, systemd start-limit failures, and stranded `ready/`, `claimed/`, or `failed/` state. After diagnosing repeated hard crashes, recovery resets both units with `systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service`, then restarts and enables the trigger with `systemctl --user enable --now agent-memory-lifecycle.path`.
 
-Agent-file migration is deferred beyond the MVP. The MVP only copies selected agent context files into the vault as visibility snapshots without changing their native locations. This is not a migration or cutover: it does not create symlinks, change agent load paths, or keep the copies synchronized. Native files remain the runtime source of truth until the user establishes symlinks later.
+## 11. Agent-specific files and skills
 
-### 11.2 Pi files
+The MVP does not copy, manage, migrate, or expose Pi/Hermes agent files or skills in the vault and does not create `agents/` or `skills/` directories. Native files, skill packages, configurations, and load paths remain outside memory-system management.
 
-The MVP copies global `AGENTS.md` into `agents/pi/` when it exists. `SYSTEM.md`, `APPEND_SYSTEM.md`, `settings.json`, Pi skills, authentication, trust state, installed packages, caches, and raw sessions remain native and outside MVP management.
-
-### 11.3 Hermes files
-
-The MVP copies:
-
-- `SOUL.md`;
-- `memories/USER.md`; and
-- `memories/MEMORY.md`.
-
-`config.yaml`, skills, all migration and rollback tooling, load-path changes, and symlinks are deferred. `MEMORY.md` remains a compact, native working-context map for recent or active work and projects; it is not the authoritative durable concept store. Later native edits do not automatically update the vault copy or create managed OKF log entries.
-
-Hermes secrets, authentication, logs, caches, locks, raw sessions, `state.db`, database sidecars, and bundled skills remain outside the vault.
-
-### 11.4 Skills
-
-Vault skills are divided into:
-
-- `skills/shared/`
-- `skills/pi-only/`
-- `skills/hermes-only/`
-
-Shared is preferred. Skills remain native `SKILL.md` packages and are not required to conform to OKF.
+Any future snapshots, migration, secret audit, canonical-path change, symlink cutover, divergence handling, rollback tooling, skill generation, or skill loading require a separately approved post-MVP design.
 
 ## 12. Obsidian experience
 
@@ -343,7 +306,7 @@ Reconciliation validates the concept, preserves original creation metadata, reco
 
 ### 13.1 Managed log
 
-The OKF bundle uses the reserved root `memory/log.md`, not `CHANGELOG.md`. It records concise, newest-first summaries of CLI-managed concept creations, updates, verifications, promotions, renames, reconciliations, and deletions.
+The OKF bundle uses the reserved root `memory/log.md`, not `CHANGELOG.md`. It records concise, newest-first summaries of CLI-managed concept creations, updates, verifications, renames, reconciliations, and deletions.
 
 ### 13.2 Git
 
@@ -369,7 +332,7 @@ If a Syncthing conflict copy is detected anywhere in the vault, managed writes f
 
 ### 14.4 Secrets
 
-The vault and code repository must not contain `.env`, authentication tokens, API keys, bot tokens, OAuth credentials, or other secrets. Agent files selected for the one-time copy are screened before entering the vault. Notifications and logs must not include raw prompts, secret values, or unrestricted tool output.
+The vault and code repository must not contain `.env`, authentication tokens, API keys, bot tokens, OAuth credentials, or other secrets. Managed writes reject secret-bearing filenames and content before staging. Notifications, lifecycle descriptors, worker diagnostics, and error records must redact raw prompts, secret values, and unrestricted tool output, including durable lifecycle state stored outside Git.
 
 ### 14.5 Policy boundary
 
@@ -383,7 +346,7 @@ Failures are surfaced through all available paths:
 - Hermes notifications in the originating interface, including the authenticated Telegram DM where possible;
 - persistent `system/errors.md` entries;
 - a warning on the next agent turn when immediate delivery fails; and
-- `memory doctor`.
+- `memory doctor`, including failed lifecycle path/service units, systemd start-limit state, and stranded worker queues.
 
 Error records include timestamp, agent, session ID, operation, concise failure, and retry state. They exclude sensitive content.
 
@@ -398,16 +361,17 @@ The MVP is accepted only after an end-to-end test demonstrates that both Pi and 
 5. record context access in the correct session summary;
 6. update OKF indexes and `log.md`;
 7. create one atomic Git commit per managed transaction;
-8. append checkpoints on Pi compaction, Hermes gateway/Telegram compression, and `/new` or reset, with Hermes CLI compressed intervals captured at reset or finalization;
-9. synchronize changes into Obsidian;
-10. present expected Bases views;
-11. reconcile a direct Obsidian edit;
-12. preserve uncommitted user work during a targeted-file conflict;
-13. block writes during a simulated Syncthing conflict;
-14. recover or retry a simulated summary failure without blocking the agent session; and
-15. keep secrets and raw session stores outside the vault.
+8. reuse Pi's exposed native compaction summaries and, for Hermes gateway/Telegram compression, bind exact message-row boundaries and an isolated-summary row/hash at publication, then verify and store only that bounded segment, while materializing reset, `/new`, and finalization lifecycle/audit state without synthesizing unavailable summaries;
+9. drain durable `claimed/` then `ready/` lifecycle descriptors idempotently with `memory worker --once` under rendered dual-`DirectoryNotEmpty=` systemd user path activation and a `Type=oneshot` service, including post-claim and commit-before-delete crashes, backlog, lingering boot/next-login recovery, failed-descriptor retry, and start-limit diagnosis/reset recovery;
+10. synchronize changes into Obsidian;
+11. present expected Bases views;
+12. reconcile a direct Obsidian edit;
+13. preserve uncommitted user work during a targeted-file conflict;
+14. block writes during a simulated Syncthing conflict;
+15. recover or retry a simulated lifecycle-materialization failure without blocking the agent session; and
+16. keep secrets and raw session stores outside the vault and keep secrets out of lifecycle/error state outside Git.
 
-Focused automated integration tests, rather than the live acceptance exercise, verify Note deletion authorization, verification invalidation, procedure-use recording, and automatic promotion.
+Focused automated integration tests, rather than the live acceptance exercise, verify Note deletion authorization and verification invalidation.
 
 Semantic search and adaptive retrieval work must not begin until this workflow is operating and its failures have been observed.
 
@@ -419,7 +383,7 @@ After the MVP has produced a useful corpus, retrieval misses and irrelevant read
 
 ### 17.2 Adaptive workflows
 
-Later versions may detect recurring tasks, suggest procedure refinement, evaluate retrieved context usefulness, and improve promotion decisions. These automatic workflow-discovery and adaptive-refinement features require measured outcomes and a fixed evaluation approach rather than intuition alone. They are distinct from the MVP's deterministic promotion of an existing Procedure after its explicit eligibility conditions are satisfied.
+Later versions may detect recurring tasks, suggest procedure refinement, evaluate retrieved context usefulness, or propose a complete procedure-to-skill pipeline. Procedure-use events, success counters, eligibility, automatic promotion, generated `SKILL.md`, skill directories, and load-path work require measured outcomes and a separately approved design.
 
 ### 17.3 Additional observability
 
@@ -429,16 +393,24 @@ Potential additions include watcher-based logging of native Hermes memory edits,
 
 If Hermes later participates in untrusted channels, work knowledge requires a stronger boundary using separate profiles, Unix permissions, sandboxing, or channel-specific agent processes.
 
-### 17.5 Agent-file migration
+### 17.5 Agent-file and skill work
 
-A later proposal may make selected vault files canonical and connect native agent paths through configuration or symlinks. That work must separately define backups, secret auditing, skill classification, collision handling, divergence, validation, cutover, and rollback. None of it is part of the MVP.
+All snapshots, managed `agents/` or `skills/` vault directories, migration, and cutover are deferred. A later proposal may make selected vault files canonical and connect native agent paths through configuration or symlinks, but it must separately define backups, secret auditing, skill classification, collision handling, divergence, validation, cutover, and rollback.
 
 ## 18. Hermes CLI compatibility decision
 
-Hermes Agent 0.20.0 emits `session:compress` for gateway sessions, including Telegram, but its public CLI plugin hook set does not expose an equivalent compression event. The approved MVP behavior is therefore:
+Hermes Agent 0.20.0 emits `session:compress` for gateway sessions, including Telegram, but the installed hook exposes only `platform`, `session_id`, `old_session_id`, `in_place`, and `compression_count`. It exposes no summary, model, timestamp, or native event ID. Its public CLI plugin hook set does not expose an equivalent compression event. The approved MVP behavior is therefore:
 
-- full compression checkpoints for Hermes gateway/Telegram sessions;
-- reset, `/new`, and finalization checkpoints for Hermes CLI sessions; and
-- Hermes CLI compression captured at the next detectable reset or finalization, without a core patch in the MVP.
+- treat gateway `session:compress` only as a committed-compression signal;
+- under persisted adapter state, capture the previous and current message-row high-water boundaries after each committed compression and inspect only bounded candidate row IDs, summary-classification metadata, and content;
+- atomically publish a descriptor containing the five exposed lineage fields, both boundaries, and, when unambiguous, the isolated native-summary candidate row ID and SHA-256 hash, but no summary or raw conversation text;
+- derive the event identity from a versioned canonical encoding of all published identity fields, including boundaries and nullable candidate identity, rather than from the five hook fields alone, and persist the current boundary plus old/new lineage before returning;
+- have `memory worker --once` fetch the exact bounded candidate row, re-isolate it using Hermes 0.20.0's recognized standalone/merged summary classification, prefix, merged delimiter, and end marker, verify row ID/hash, and store only the isolated segment with any preserved tail/live user content excluded;
+- never serialize archived/raw conversation rows or `pre_llm_call` conversation history;
+- if classification, isolation, or hash verification is ambiguous or fails, record lifecycle metadata and `native summary unavailable`;
+- on Hermes CLI reset, `/new`, and finalization, flush lifecycle and context-access audit state; and
+- never reconstruct an unavailable intermediate summary from raw dialogue/tool output or with another model.
+
+Hermes state binding MUST be lazy and idempotent on every `pre_llm_call`, because `on_session_start` may not run for a continued or resumed session. Durable adapter state records the injection identity, old/new compression lineage, and current message-row high-water boundary so restart, resume, and rotated-session processing neither duplicate injection nor orphan checkpoints. Model provenance may be used only when exposed by a separate reliable Hermes context; the gateway compression hook itself supplies none.
 
 An invasive Hermes core patch solely for CLI compression is out of scope for the MVP.

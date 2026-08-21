@@ -2,7 +2,7 @@
 
 ## 1. Scope and conventions
 
-This document defines the MVP architecture and contracts for Agent Obsidian Memory. Product behavior is defined in [product-specification.md](product-specification.md). The implementation is a Python application installed with `uv`, plus thin Pi and Hermes adapters.
+This derived document describes the MVP architecture and contracts for Agent Obsidian Memory. [product-specification.md](product-specification.md) is the sole normative source and wins on conflict. The implementation is a Python application installed with `uv`, plus thin Pi and Hermes adapters.
 
 Paths shown here are deployment defaults and MUST be configurable unless identified as native agent paths.
 
@@ -14,10 +14,11 @@ Paths shown here are deployment defaults and MUST be configurable unless identif
 |---|---|
 | `memory` CLI | Validate, search, retrieve, mutate, reconcile, index, log, commit, and inspect the vault |
 | Python core library | Shared domain model, OKF parser, transaction engine, Git integration, session writer, and policy enforcement |
-| Durable event worker | Process queued lifecycle events outside agent shutdown/reset callbacks and perform summarization, extraction, checkpointing, automatic promotion, retries, and notifications |
-| Pi adapter | Inject root index, expose session/model context, enqueue compaction and session lifecycle events, and notify immediate errors |
-| Hermes adapter | Inject root index, expose Hermes session/model/channel context, observe compression/reset/finalization, create checkpoints, and notify errors |
-| Obsidian vault | Canonical human-readable concepts, selected agent files, skills, summaries, and system status |
+| `memory worker --once` | Under one worker lock, recover claimed descriptors first, then atomically claim and process ready descriptors one at a time until both queues are empty; materialize native summaries and audit state idempotently, run bounded in-invocation retries, move exhausted work to failed state, notify, and exit |
+| systemd user `.path` + oneshot service | Use `DirectoryNotEmpty=` for both ready and claimed queues to activate `memory worker --once` for normal, crash-recovery, backlog, and boot/login processing; not an application daemon |
+| Pi adapter | Inject root index, expose session/model context, publish compaction and lifecycle descriptors, and notify immediate errors |
+| Hermes adapter | Inject root index, expose session/model/channel context, publish compression/reset/finalization descriptors, and notify errors |
+| Obsidian vault | Canonical human-readable concepts, native-summary checkpoints, and system status |
 | Syncthing | Bidirectional replication between server vault and local Obsidian vault |
 | Git | Version history, attribution, recovery, and private-remote backup |
 | Obsidian Bases | Human filtering, grouping, and editing of Markdown properties |
@@ -47,14 +48,13 @@ Paths shown here are deployment defaults and MUST be configurable unless identif
 
 #### Session checkpoint
 
-1. A native compaction, compression, reset, switch, or finalization event fires.
-2. The adapter captures session identity, active model, trigger, native summary when available, and event identity.
-3. The adapter writes a sanitized, idempotent descriptor to a durable queue outside the synchronized vault and returns within a fixed timeout.
-4. A supervised worker uses the active or configured model to convert essential context into the session checkpoint schema.
-5. The CLI appends an idempotent checkpoint to the session's one Markdown file.
-6. Reusable-knowledge candidates are extracted at this boundary.
-7. Valid candidates are passed through duplicate search and an ordinary memory transaction.
-8. Worker failure is retried without blocking the native lifecycle.
+1. A native compaction, compression, reset, `/new`, or finalization event fires and its handler runs.
+2. A Pi adapter captures the exposed stable compaction entry ID and `compactionEntry.summary`. After a committed Hermes gateway compression, the handler uses persisted adapter state to bind the exposed lineage to previous/current message-row high-water boundaries and, when unambiguous, an isolated native-summary candidate row ID/hash; it does not receive a summary, model, timestamp, or native event ID from the hook payload.
+3. The adapter atomically publishes a sanitized, idempotent descriptor to a durable non-hidden ready directory outside the synchronized vault and returns within a fixed timeout after persisting the new Hermes boundary/lineage. Abrupt-exit recovery begins only after publication completes.
+4. The systemd user `.path` unit activates a `Type=oneshot` service running `memory worker --once` when either ready or claimed state is non-empty.
+5. Under one worker lock, the command recovers claimed descriptors first, then claims and processes ready descriptors one at a time until both are empty. For Hermes gateway compression it fetches the exact descriptor-bound candidate row, re-isolates and verifies its summary segment, and stores only that segment; otherwise it consumes the Pi descriptor summary. It appends checkpoints idempotently without another model pass.
+6. Reset, `/new`, and finalization materialize pending context-access audit and lifecycle state. An unavailable summary produces lifecycle metadata and `native summary unavailable`, never raw dialogue/tool output.
+7. Retryable failures receive bounded capped backoff in the same invocation. Exhausted descriptors move to unwatched failed state for explicit `memory retry`; no delayed work remains in ready and no timer is used. Processing failure never blocks the native lifecycle.
 
 ## 3. Repository and vault boundaries
 
@@ -69,6 +69,9 @@ Paths shown here are deployment defaults and MUST be configurable unless identif
 ├── adapters/
 │   ├── pi/
 │   └── hermes/
+├── deploy/systemd/
+│   ├── agent-memory-lifecycle.path
+│   └── agent-memory-lifecycle.service
 ├── tests/
 └── scripts/
 ```
@@ -89,21 +92,6 @@ This repository contains no user memory corpus, raw sessions, or credentials.
 │   └── concepts/
 │       ├── index.md
 │       └── <concept-id>.md
-├── agents/
-│   ├── pi/
-│   │   └── AGENTS.md                  # one-time copy; native file remains authoritative
-│   └── hermes/
-│       ├── SOUL.md                    # one-time copy
-│       └── memories/
-│           ├── USER.md
-│           └── MEMORY.md
-├── skills/
-│   ├── shared/
-│   │   └── <skill>/SKILL.md
-│   ├── pi-only/
-│   │   └── <skill>/SKILL.md
-│   └── hermes-only/
-│       └── <skill>/SKILL.md
 ├── sessions/
 │   ├── pi/<year>/<session-id>.md
 │   └── hermes/<year>/<session-id>.md
@@ -115,7 +103,7 @@ This repository contains no user memory corpus, raw sessions, or credentials.
 
 `memory/` alone is an OKF bundle. Markdown elsewhere in the vault follows its native format and is outside OKF conformance checks.
 
-Transaction journals, rendered candidates, and backups live outside the vault at `/home/donald/.agent-memory-txn/`. The CLI verifies that this sibling directory is on the same filesystem as the vault before a write. Files under `agents/` are one-time MVP visibility snapshots, not migrated files; native agent files remain authoritative until the user creates symlinks later outside the MVP.
+Transaction journals, rendered candidates, and backups live outside the vault at `/home/donald/.agent-memory-txn/`. The CLI verifies that this sibling directory is on the same filesystem as the vault before a write. Durable lifecycle descriptors and audit spools live in user state outside the vault. The MVP creates no `agents/` or `skills/` vault directories and does not copy or alter native agent files.
 
 ### 3.3 Exclusions
 
@@ -173,7 +161,7 @@ okf_version: "0.2"
 # Agent Memory
 
 Short explanation of the corpus, approved types and scopes, retrieval commands,
-and links to the concept index, log, Obsidian Base, sessions, skills, and agent files.
+and links to the concept index, log, Obsidian Base, and sessions.
 ```
 
 The root index is compact enough for automatic new-session injection. It MUST describe structure and retrieval behavior rather than enumerate every concept.
@@ -193,7 +181,7 @@ The index generator MUST be deterministic: the same concept set produces byte-id
 * **Update**: [Agent Memory System](concepts/agent-memory-system.md) — corrected the canonical vault path. Actor `pi/0.84.2`, model `openai-codex/gpt-5.4`, session `…`.
 ```
 
-Allowed leading labels include `Creation`, `Update`, `Verification`, `Rename`, `Promotion`, `Reconciliation`, and `Deletion`. A deletion links only when a stable replacement exists; otherwise it records the former concept ID as code.
+Allowed leading labels include `Creation`, `Update`, `Verification`, `Rename`, `Reconciliation`, and `Deletion`. A deletion links only when a stable replacement exists; otherwise it records the former concept ID as code.
 
 The log is an operational summary. Git remains the complete diff and attribution record.
 
@@ -256,8 +244,7 @@ The local profile requires more than base OKF:
 - `sources`: OKF provenance entries;
 - `stale_after`: ISO date with a meaningful review policy;
 - `resource`: canonical external URI where a concept describes another asset;
-- `content_owner`: required for `Note`, with value `user` or `agent`;
-- procedure-specific local fields described below; and
+- `content_owner`: required for `Note`, with value `user` or `agent`; and
 - future producer extensions, which must be preserved.
 
 ### 5.4 Actor identities
@@ -330,29 +317,9 @@ When available, `sources` links to:
 
 Bundle-relative paths are preferred inside the bundle. Relative paths may traverse to non-OKF vault content. Absolute server paths may be recorded as text or file resources when they are useful to agents, but the concept should acknowledge that they are not portable to the local Obsidian computer.
 
-## 6. Procedure usage and promotion schema
+## 6. Procedure scope
 
-A procedure records a minimal list of use events:
-
-```yaml
-procedure:
-  promotion_state: collecting-evidence
-  uses:
-    - at: 2026-06-03T12:00:00Z
-      outcome: success
-      source: ../../sessions/pi/2026/019....md#checkpoint-2--compaction
-```
-
-`successful_uses` is derived from `uses[].outcome`, not independently edited. Every use MUST have a timestamp, `success` or `failure` outcome, and stable source checkpoint. Actor, exact model, and detailed context are resolved through that checkpoint rather than duplicated. Failed or ambiguous uses do not count toward promotion; they may update the body with a pitfall or corrective step.
-
-The durable worker promotes a procedure automatically when it has:
-
-- at least three `success` events;
-- a clear verification method;
-- an agent assertion that the steps are stable based on observed uses; and
-- known target compatibility, defaulting to `shared` when no agent-specific dependency exists.
-
-Promotion generates or updates a native Agent Skills package in one CLI transaction. The source concept remains `type: Procedure`, retains provenance and every use event, links to the generated `SKILL.md`, and is shortened so the executable steps have one canonical home.
+A Procedure uses the ordinary concept schema and transaction path. The MVP has no procedure-use event schema, counters, eligibility state, promotion commands, generated `SKILL.md`, skill directories, or load-path integration. The complete procedure-to-skill pipeline is deferred.
 
 ## 7. Session summary schema
 
@@ -370,10 +337,9 @@ started_at: 2026-06-03T10:00:00Z
 updated_at: 2026-06-03T14:00:00Z
 status: active
 checkpoint_count: 2
-models:
+host_models:
   - openai-codex/gpt-5.4
-summarizers:
-  - openai-codex/gpt-5.4
+summary_policy: native-only
 ---
 ```
 
@@ -383,10 +349,6 @@ summarizers:
 
 ```markdown
 # Session title
-
-## Objective
-
-Concise current objective.
 
 ## Context Access
 
@@ -405,30 +367,36 @@ Concise current objective.
 
 - **Time:** ...
 - **Event ID:** ...
-- **Summarizer:** ...
+- **Native summary source:** pi compaction
+- **Host model:** ...
 
-### Objective
-### Essential Context
-### Decisions
-### Actions and Outcomes
-### Files Changed
-### Memory and Skill Changes
-### Unresolved Items
+### Native Summary
+
+The summary exposed by the host.
 
 ## Checkpoint 2 — Finalization
+
+### Native Summary
+
+native summary unavailable
 ...
 ```
 
 ### 7.3 Checkpoint semantics
 
-- A checkpoint summarizes the interval since the previous checkpoint while retaining enough cumulative state to understand the session.
+- A Pi checkpoint stores the native `compactionEntry.summary` and stable compaction entry ID exposed by `session_compact`, plus available host provenance.
+- A Hermes gateway descriptor binds the committed event to persisted previous/current message-row high-water boundaries and, when unambiguous, one classified native-summary row ID plus SHA-256 of its isolated segment. A checkpoint stores only the segment that the worker re-isolates from that exact bounded row after verifying the ID/hash.
+- Hermes 0.20.0 isolation accepts recognized standalone or merged summary carriers only when its summary prefix, optional merged delimiter, and end marker identify exactly one summary body. The isolated body is after the prefix and before the matching end marker; SHA-256 hashes its UTF-8 bytes. A merged delimiter must uniquely separate preserved tail/live user content, all of which remains outside the isolated body. Ambiguous structure, multiple carriers, or hash mismatch yields `native summary unavailable`.
+- Candidate classification may inspect only needed row metadata/content. The publisher and worker never serialize archived/raw conversation rows, preserved tails, or the conversation history passed to `pre_llm_call`. No active, configured, or dedicated summarizer model is called.
+- If the single classified native summary cannot be bound and verified, the checkpoint stores available lifecycle metadata and `native summary unavailable`; it never copies raw dialogue/tool output or synthesizes a replacement.
 - The checkpoint index is regenerated deterministically.
-- Native event ID, compaction count, or a derived stable hash provides idempotency.
-- A retried event with the same ID replaces a failed placeholder or becomes a no-op; it never appends a duplicate.
-- Context-access events are appended immediately to a per-session JSONL spool under the durable local state directory, using an atomic locked append. They are materialized into the Markdown table and committed at the next checkpoint or finalization.
+- Pi's stable compaction entry ID or Hermes's deterministic descriptor event identity provides idempotency.
+- A retried event with the same ID replaces a failed placeholder or becomes a no-op; it never appends a duplicate. A replay after commit but before descriptor deletion is therefore safe.
+- Context-access events are appended immediately to a per-session JSONL spool under the durable local state directory, using an atomic locked append. They are materialized at the next checkpoint and always on reset, `/new`, or finalization.
 - The audit spool is outside Syncthing and Git, contains no concept body, and survives agent-process exit.
 - Finalization sets `status: closed`. A failed or abruptly lost session may remain `active` until `memory session recover` marks it `incomplete` or finalizes it.
 - Completed checkpoint text may be edited. Anchors SHOULD remain stable, and Git preserves prior versions.
+- Automatic reusable-knowledge extraction is absent. Agents may explicitly create/update durable concepts during ordinary turns.
 
 ## 8. Obsidian Bases contract
 
@@ -493,8 +461,8 @@ memory recover --transaction <id> [--apply]
 
 - `init` creates an empty vault skeleton but never overwrites populated files.
 - `validate` checks OKF conformance, local schema, links, indexes, word limits, and configured policy.
-- `doctor` checks paths, transaction-state filesystem placement, lock health, Git, unpushed local commits, Syncthing conflict files, adapter installation, copied agent files, pending retries, and secret exclusions.
-- `retry` requeues failed work after automatic retries are exhausted.
+- `doctor` checks paths, transaction-state filesystem placement, worker lock, ready/claimed/failed descriptors and stranded queue state, failed lifecycle path/service units and systemd start-limit state, Git, unpushed local commits, Syncthing conflict files, adapter installation, and secret exclusions.
+- `retry` atomically republishes eligible failed descriptors to ready state after automatic retries are exhausted.
 - `recover` previews interrupted-transaction recovery by default; `--apply` performs the displayed recovery plan.
 
 #### Retrieval
@@ -527,11 +495,13 @@ memory apply <transaction.yaml> [--dry-run]
 
 All mutation commands support a dry-run representation through either `--dry-run` or the batch transaction command. Mutation output includes changed paths and the local commit hash.
 
-#### Procedures and skills
+#### Lifecycle worker
 
 ```bash
-memory procedure use <concept-id> --result success|failure --source RESOURCE
+memory worker --once
 ```
+
+On every start, the command acquires one worker lock, recovers descriptors already in `claimed/` first, then atomically moves and processes one `ready/` descriptor at a time until both directories are empty. It deletes a descriptor only after committed materialization; replay after a commit-before-delete crash is safe by event idempotency. Retryable failures receive bounded capped backoff within this invocation, and exhausted work moves to unwatched `failed/`. `memory retry` republishes failed work. It is run by a systemd user `Type=oneshot` service activated by a `.path` unit; no timer or application daemon is used.
 
 #### Sessions
 
@@ -540,13 +510,13 @@ memory session start --agent AGENT --session-id ID [context options]
 memory session access --session-id ID --mode injected|search|show
                       [--query TEXT] [--concept ID ...]
 memory session checkpoint --session-id ID --event-id ID
-                          --trigger compaction|compression|reset|finalization
-                          --summary-file PATH [context options]
+                          --trigger compaction|compression|reset|new|finalization
+                          [--native-summary-file PATH] [context options]
 memory session finalize --session-id ID [--event-id ID]
 memory session recover [--agent AGENT]
 ```
 
-Both external adapters use the JSON form of these CLI commands and do not import the Python library directly. The supervised worker is internal to the memory application and may call the core library.
+Both external adapters use the JSON form of these CLI commands and do not import the Python library directly. The lifecycle worker is internal to the memory application and may call the core library.
 
 `memory delete` rejects a `Note` with `content_owner: user` unless a `human:donald` authorization and source are supplied. An interactive human may run `memory verify <concept-id>` directly; an agent asserting human review must include an authorization source.
 
@@ -609,12 +579,10 @@ The CLI explains which fields matched. This ordering is fixed for the MVP and ha
 Creation preflight checks:
 
 - exact slug collision: hard failure;
-- exact normalized title: hard failure with existing concept suggestion;
-- high title similarity: warning and explicit distinct-concept confirmation required;
-- overlapping description keywords: advisory candidate list; and
-- related concept links: advisory only.
+- exact normalized title: hard failure with the existing concept suggestion; and
+- ordinary deterministic search results: candidate list for the agent to inspect.
 
-The default normalized-title similarity threshold is configurable, initially `0.86`. The CLI does not claim semantic equivalence; the agent decides whether to update an existing concept or select a genuinely distinct name. Managed creation with an unknown type fails until `system/memory.yaml` explicitly extends the vocabulary; reading imported unknown types remains valid and produces a warning.
+The MVP has no fuzzy similarity threshold, fuzzy configuration, or distinct-concept confirmation override. Managed creation with an unknown type fails until `system/memory.yaml` explicitly extends the vocabulary; reading imported unknown types remains valid and produces a warning.
 
 ## 11. Transaction and Git semantics
 
@@ -697,12 +665,12 @@ Both adapters provide:
 
 - `on_session_start(context)`
 - `inject_root_index(context)`
-- `enqueue_checkpoint(trigger, native_reference, context)`
-- `enqueue_session_finalize(context)`
+- `publish_checkpoint(trigger, native_reference, context)`
+- `publish_session_finalize(context)`
 - `notify(level, message, context)`
-- `enqueue_retry(operation, sanitized_context)`
+- `publish_retry(operation, sanitized_context)`
 
-An adapter is thin: it persists a minimal event descriptor before returning and does not perform model or Git work in a teardown/reset callback. Domain validation, file rendering, Git, retries, and summaries remain in the Python core and supervised worker.
+An adapter is thin: it atomically publishes a minimal descriptor before returning and does not perform model or Git work in a teardown/reset callback. A lifecycle event becomes recoverable only after publication completes; no recovery is promised if the handler never ran or publication failed. Domain validation, file rendering, Git, retries, and native-summary checkpoint materialization remain in the Python core and `memory worker --once`.
 
 ### 13.2 Pi adapter
 
@@ -710,9 +678,9 @@ The Pi adapter is an auto-discovered TypeScript extension. It uses documented li
 
 - `session_start` to establish session state;
 - the first `before_agent_start` to add the root index as a visible persistent custom message;
-- `session_compact` after a compaction entry is saved, to enqueue its stable native entry reference;
+- `session_compact` after a compaction entry is saved, to publish its stable native entry reference and exposed native summary;
 - `session_shutdown` for `new`, `resume`, `fork`, and `quit` finalization; and
-- Pi UI notification methods for enqueue failures.
+- Pi UI notification methods for descriptor-publication failures.
 
 `reload` must not close or duplicate the logical session summary. The adapter uses `ctx.sessionManager`, `ctx.model`, and Pi's session environment. It writes the durable descriptor within a bounded timeout, then returns. Checkpoint work must be idempotent because overflow recovery and extension reloads can repeat lifecycle edges.
 
@@ -720,14 +688,21 @@ The Pi adapter is an auto-discovered TypeScript extension. It uses documented li
 
 The Hermes adapter is an enabled user plugin plus a narrow gateway hook:
 
-- the plugin uses `pre_llm_call` on the first turn for root-index context;
-- the plugin uses `on_session_start` for state initialization;
+- every `pre_llm_call` lazily and idempotently binds current session state, because `on_session_start` may not run for continued or resumed sessions;
+- the same binding injects the root index only when its persisted injection identity has not already been recorded;
+- `on_session_start`, when it runs, may eagerly invoke the same idempotent binding but is not required for correctness;
 - the gateway `HOOK.yaml` handler observes `session:compress` for Telegram and other gateway sessions;
 - the plugin uses `on_session_finalize` before `/new`, gateway reset/GC, or CLI exit;
 - the plugin uses `on_session_reset` to bind the new identity; and
-- the durable worker uses Hermes host-owned LLM access or an explicitly configured provider/model for structured summarization.
+- durable adapter state records injection identity, old/new compression lineage, and the current message-row high-water boundary across restart and resume.
 
-Hermes 0.20.0 does not expose CLI compression through its public plugin lifecycle. The MVP therefore records gateway compression immediately, while Hermes CLI compression is incorporated at the next reset or finalization. Patching Hermes core is outside the MVP. The adapter reads hook-scoped Hermes session and model context rather than process-global defaults when concurrent gateway sessions are possible. The provider/model actually returned by host-owned LLM access is recorded. Telegram notification targets must match the configured authenticated direct message.
+Hermes 0.20.0 gateway `session:compress` exposes exactly `platform`, `session_id`, `old_session_id`, `in_place`, and `compression_count`; it exposes no summary, model, timestamp, or native event ID. Because `compression_count` may reset, those five fields alone are not an event identity. After the compression is committed and under the per-session persisted adapter-state lock, the hook reads the previous message-row high-water boundary, obtains the current high-water boundary, and queries only row ID, Hermes summary-classification metadata, and content for candidates in `(previous, current]`. It applies Hermes 0.20.0's recognized classification and structure: a standalone carrier is accepted only when one summary prefix and matching end marker isolate the sole summary body; a merged carrier is accepted only when the recognized merged delimiter uniquely separates preserved content from one prefix/body/end-marker frame. The body after the prefix and before the end marker is the isolated segment; all framing, preserved tail, and live user content is excluded. Missing, duplicate, conflicting, or misordered markers and multiple carriers are ambiguous.
+
+The hook atomically publishes the five fields, both boundaries, pending audit references, and, when isolation is unambiguous, the candidate row ID and SHA-256 of the isolated native summary segment. No summary text, preserved tail, or raw conversation is placed in the descriptor. Its event ID is SHA-256 over a version-tagged canonical JSON encoding of the five fields, both boundaries, and nullable candidate row ID/hash. Before returning, the hook durably persists the current high-water boundary and old/new lineage. Publication and state advancement run under the same lock and must be restart-idempotent, so two in-place compressions may remain queued without either descriptor being rebound to a later row and a reset `compression_count` cannot collide with an older event.
+
+For that event, `memory worker --once` orders queued Hermes descriptors within a logical lineage by ascending message-row boundary, fetches the exact candidate row named inside each descriptor's boundaries, reads only metadata/content needed to repeat classification, re-isolates the segment with the same Hermes 0.20.0 rules, and verifies the row ID and SHA-256 before storing only that isolated segment. It never searches later rows to repair a stale descriptor and never serializes non-summary rows, preserved tails, archived/raw conversation, or history passed to `pre_llm_call`. A missing candidate identity, changed/missing row, ambiguous classification/isolation, or hash mismatch yields lifecycle metadata and `native summary unavailable`.
+
+Hermes 0.20.0 does not expose CLI compression through its public plugin lifecycle. CLI reset, `/new`, and finalization descriptors flush lifecycle/audit state and record `native summary unavailable` unless a separate reliable host surface exposes a classified native summary. The gateway hook itself never supplies model provenance; model identity may come only from separately persisted, session-scoped plugin context. The adapter never reconstructs an interval or invokes another model. Patching Hermes core is outside the MVP. Telegram notification targets must match the configured authenticated direct message.
 
 ### 13.4 Index injection record
 
@@ -744,42 +719,48 @@ identity:
   human: human:donald
 limits:
   concept_words: 600
-  duplicate_similarity: 0.86
 locking:
   timeout_seconds: 10
 search:
   default_limit: 10
-summaries:
-  provider: active
-  model: active
-  max_output_tokens: 2500
-  include_tool_output: essential-only
 transactions:
   state_dir: /home/donald/.agent-memory-txn
 git:
   branch: main
-  auto_commit: true
 syncthing:
   folder_id: agent-memory
-sessions:
-  checkpoint_on_compaction: true
-  checkpoint_on_reset: true
-  checkpoint_on_finalize: true
 worker:
-  queue_dir: ~/.local/state/agent-memory/queue
-  audit_dir: ~/.local/state/agent-memory/audit
-  enqueue_timeout_ms: 250
+  state_dir: ~/.local/state/agent-memory/lifecycle
+  publish_timeout_ms: 250
 notifications:
   pi_tui: true
   hermes_origin: true
   telegram_owner_dm: true
   errors_file: system/errors.md
-skills:
-  promotion_successes: 3
-  prefer_shared: true
 ```
 
-Model overrides accept exact provider/model IDs. Credentials are resolved by Pi, Hermes, environment variables, or the provider's native authentication store.
+`worker.state_dir` is the single configurable worker-state path. `ready/`, `claimed/`, `failed/`, audit spools, locks, and adapter state are derived beneath it; the three queue directories are not independently configurable. Managed writes always create local commits, and observable lifecycle triggers always request their required checkpoints; neither behavior has an enable/disable configuration switch. There is no summarizer model configuration. Agent model identifiers are captured only as host provenance when a reliable host surface exposes them. Credentials remain owned by Pi or Hermes and are not read for checkpoint generation.
+
+### 14.1 systemd activation contract
+
+The non-hidden `ready/` and `claimed/` directories derived from `worker.state_dir` are both watched. Installation renders both `DirectoryNotEmpty=` values into the user's `.path` unit from the resolved configured state directory. The following unit is only the deployment-default rendered example:
+
+```ini
+[Unit]
+Description=Activate Agent Memory lifecycle drain
+
+[Path]
+DirectoryNotEmpty=%h/.local/state/agent-memory/lifecycle/ready
+DirectoryNotEmpty=%h/.local/state/agent-memory/lifecycle/claimed
+Unit=agent-memory-lifecycle.service
+
+[Install]
+WantedBy=default.target
+```
+
+The target service has `Type=oneshot` and `ExecStart=memory worker --once`. After rendering or updating both units, installation runs `systemctl --user daemon-reload`, then `systemctl --user enable --now agent-memory-lifecycle.path`, and enables boot-without-login recovery with `loginctl enable-linger "$USER"`. If lingering is not enabled, a boot backlog is recovered at the next login instead. The command's single worker lock prevents concurrent drains if activations coalesce or overlap. Watching `claimed/` recovers a post-claim crash; watching `ready/` handles newly published work and backlog. No timer, long-running application daemon, or in-process queue consumer is part of the MVP.
+
+Repeated hard service crashes can exhaust systemd start limits and strand queue work even though path activation is configured. `memory doctor` inspects both units for failed/start-limit state and reports non-empty `ready/`, `claimed/`, or `failed/` directories, including a watched queue whose path/service is not able to run. After diagnosing the crash with unit status/journal output and correcting its cause, the runbook executes `systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service`, followed by `systemctl --user enable --now agent-memory-lifecycle.path` to restore activation.
 
 ## 15. Error and retry contract
 
@@ -800,14 +781,14 @@ It never stores conversation bodies, raw tool output, secret-bearing command lin
 
 ### 15.2 Retry descriptor
 
-A retry descriptor contains only the minimum durable inputs needed to reproduce a failed managed operation. Lifecycle descriptors and audit spools live under the user's durable state directory, outside Git and Syncthing. Large or sensitive native session material remains in the native store and is addressed by session ID, immutable native event reference, and event range. Retry execution revalidates current state and must not apply stale model output over a newer concept.
+A retry descriptor contains only the minimum durable inputs needed to reproduce a failed managed operation. Lifecycle descriptors and audit spools live under the user's durable state directory, outside Git and Syncthing, and receive the same secret rejection/redaction policy as vault writes and errors. Large or sensitive native session material remains in the native store and is addressed by session identity and a stable native row/entry reference when available. Retry execution revalidates current state and must not replace a newer checkpoint with stale native-summary or lifecycle data. Retryable work is attempted a bounded number of times with capped backoff before the current oneshot exits; exhaustion atomically moves it to unwatched `failed/`, non-retryable work moves there immediately, and `memory retry` republishes selected failed work to `ready/`.
 
 ### 15.3 Failure classes
 
 - validation and duplicate conflicts: no automatic retry;
 - target dirty or Syncthing conflict: wait for user resolution;
 - lock timeout: bounded automatic retry;
-- model/provider transient error: exponential retry with cap;
+- transient filesystem or host-reference error: exponential retry with cap;
 - adapter notification failure: record persistent error and warn next turn; and
 - incomplete transaction journal: block new writes until recovery.
 
@@ -833,18 +814,11 @@ Hash rechecks catch synchronized changes that arrive before each replacement. Be
 
 "Hot reload" means that files created or changed on the server become visible in the local Obsidian vault after Syncthing propagation and normal Obsidian filesystem refresh. It does not require Pi or Hermes to re-read every changed context file during an already-running model call.
 
-## 17. Snapshot copy; migration deferred
+## 17. Agent-file and skill work deferred
 
-All agent-file, configuration, and skill migration is outside the MVP. The MVP performs only a one-time, non-destructive visibility copy of selected context files after confirming that each source is a regular non-secret text file:
+The MVP performs no visibility snapshot or copy, creates no `agents/` or `skills/` vault directories, and does not alter native files or load paths.
 
-- Pi global `AGENTS.md` to `agents/pi/AGENTS.md` when present;
-- Hermes `SOUL.md` to `agents/hermes/SOUL.md`;
-- Hermes `memories/USER.md` to `agents/hermes/memories/USER.md`; and
-- Hermes `memories/MEMORY.md` to `agents/hermes/memories/MEMORY.md`.
-
-This operation is not migration or cutover. It does not remove, rewrite, or replace native files, change load paths, create symlinks, or provide ongoing synchronization between native paths and vault copies. Existing vault targets are never overwritten without explicit user handling.
-
-Configuration transformation, settings/config migration, skill import, source inventory, bundled-skill classification, symlink creation, divergence handling, and rollback tooling are outside the MVP. The user will establish symlinks later outside the MVP.
+Agent-file/configuration/skill inventory, snapshotting, secret auditing for copies, migration, canonical-path changes, symlink cutover, skill generation/import, bundled-skill classification, divergence handling, validation, and rollback tooling all require a separately approved post-MVP design.
 
 ## 18. Security and privacy
 
@@ -854,8 +828,9 @@ Configuration transformation, settings/config migration, skill import, source in
 - Agent-provided paths are resolved and constrained to allowed roots before mutation.
 - YAML uses a safe parser; arbitrary tags and object construction are rejected.
 - Git arguments are passed as argv, not shell-concatenated strings.
-- Markdown content is treated as untrusted data when rendered or summarized.
-- Every staged blob receives a content scan in addition to filename checks.
+- Markdown and host-provided native summaries are treated as untrusted data when rendered.
+- Every staged blob receives a content scan in addition to filename checks; secret-bearing managed writes fail before staging.
+- Lifecycle descriptors, worker diagnostics, and errors are redacted before durable storage, including state outside Git.
 - Error messages are redacted before Telegram delivery.
 - Policy-level channel restrictions do not claim to prevent an unrestricted shell agent from reading files.
 
@@ -864,7 +839,7 @@ Configuration transformation, settings/config migration, skill import, source in
 - Vault configuration has a numeric `version`.
 - Batch transaction schemas have an independent version.
 - Local frontmatter extensions are backward-compatible additions to OKF v0.2.
-- Agent-file, configuration, and skill migration is deferred; the MVP visibility copy is explicit, non-destructive, and does not overwrite existing vault targets.
+- Agent-file snapshots, managed `agents/`/`skills/` directories, configuration or skill migration, and load-path work are deferred in full.
 - Adapter compatibility is tested against the installed Pi and Hermes versions and documented in release notes.
 - A native agent upgrade that changes lifecycle hooks or file formats causes `memory doctor` to warn until compatibility is revalidated.
 

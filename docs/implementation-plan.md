@@ -2,7 +2,7 @@
 
 ## 1. Delivery strategy
 
-The system will be delivered in serial milestones. Each milestone has one write path, focused automated tests, and an explicit acceptance gate. Semantic retrieval, workflow optimization, and other deferred features will not be mixed into the MVP.
+This derived plan follows [product-specification.md](product-specification.md), the sole normative source, which wins on conflict. The system will be delivered in serial milestones with focused tests and explicit gates. Semantic retrieval, automatic extraction, procedure-to-skill work, and agent-file/snapshot/migration work will not be mixed into the MVP.
 
 The implementation repository is currently empty apart from specifications. The vault is a separate deployment artifact and must not be created inside this repository.
 
@@ -36,7 +36,6 @@ src/agent_memory/
 ├── markdown.py
 ├── validation.py
 ├── search.py
-├── duplicates.py
 ├── indexes.py
 ├── log.py
 ├── transactions.py
@@ -44,7 +43,6 @@ src/agent_memory/
 ├── git.py
 ├── audit.py
 ├── sessions.py
-├── procedures.py
 ├── notifications.py
 ├── retry.py
 ├── worker.py
@@ -59,6 +57,10 @@ adapters/
     ├── __init__.py
     ├── gateway-hook/              # only if compression/Telegram events require it
     └── README.md
+
+deploy/systemd/
+├── agent-memory-lifecycle.path
+└── agent-memory-lifecycle.service
 
 tests/
 ├── unit/
@@ -79,42 +81,45 @@ tests/
 
 ### Gate
 
-The user confirms that the specification captures the intended system, including the Hermes CLI compression compatibility decision. The baseline is then committed. Material architecture changes after this gate are recorded as specification amendments rather than silently implemented.
+The user confirms that the product specification captures the intended system, including the Hermes CLI compression compatibility decision, and that derived documents agree with it. The baseline is then committed. Material architecture changes after this gate amend the product specification rather than being silently implemented.
 
 ## 5. Milestone 1 — Project skeleton and pure domain model
 
+**Status: Complete**
+
 ### Work
 
-1. Create `pyproject.toml`, `uv.lock`, package entry point, lint, and test configuration.
-2. Implement configuration loading with defaults and path normalization.
-3. Implement frontmatter parsing and safe YAML round-trip behavior.
-4. Define concept, actor, source, verification, and session models.
-5. Implement concept ID and slug validation.
-6. Implement body word counting and the default 600-word limit.
-7. Implement OKF v0.2 and local-profile validation.
-8. Add deterministic fixture builders for temporary vaults.
+1. [x] Create `pyproject.toml`, `uv.lock`, package entry point, lint, and test configuration.
+2. [x] Implement configuration loading with defaults and path normalization.
+3. [x] Implement frontmatter parsing and safe YAML round-trip behavior.
+4. [x] Define concept, actor, source, verification, and session models.
+5. [x] Implement concept ID and slug validation.
+6. [x] Implement body word counting and the default 600-word limit.
+7. [x] Implement OKF v0.2 and local-profile validation.
+8. [x] Add deterministic fixture builders for temporary vaults.
 
 ### Tests
 
-- parses minimal conformant OKF;
-- rejects missing or empty `type`;
-- requires local title, description, scope, and attribution;
-- preserves unknown frontmatter fields;
-- accepts bare and list-form `verified` values;
-- rejects scalar `sources` entries and requires mappings containing `resource`;
-- requires `content_owner` for Notes;
-- distinguishes human, agent, and process actors;
-- requires exact model field for agent-generated content;
-- omits model requirement for human/process actors;
-- enforces one scope;
-- rejects unknown types for managed creation while accepting them as base-OKF-conformant imported content with a local warning;
-- counts body words consistently;
-- rejects invalid slugs and traversal paths; and
-- never constructs arbitrary YAML objects.
+- [x] parses minimal conformant OKF;
+- [x] rejects missing or empty `type`;
+- [x] requires local title, description, scope, and attribution;
+- [x] preserves unknown frontmatter fields;
+- [x] accepts bare and list-form `verified` values;
+- [x] rejects scalar `sources` entries and requires mappings containing `resource`;
+- [x] requires `content_owner` for Notes;
+- [x] distinguishes human, agent, and process actors;
+- [x] requires exact model field for agent-generated content;
+- [x] omits model requirement for human/process actors;
+- [x] enforces one scope;
+- [x] rejects unknown types for managed creation while accepting them as base-OKF-conformant imported content with a local warning;
+- [x] counts body words consistently;
+- [x] rejects invalid slugs and traversal paths; and
+- [x] never constructs arbitrary YAML objects.
 
 ### Gate
 
-`uv run pytest tests/unit` and lint pass. A concept can round-trip without losing unknown metadata or changing content unexpectedly.
+- [x] `uv run pytest tests/unit` and lint pass.
+- [x] A concept round-trips without losing unknown metadata or changing body content unexpectedly.
 
 ## 6. Milestone 2 — Read-only vault and search
 
@@ -161,9 +166,10 @@ Given a fixture vault, an agent can discover a concept through the root index, s
 8. Implement OKF `log.md` prepending.
 9. Implement exact-path staging and commit metadata.
 10. Implement create, update, delete, rename, and batch apply.
-11. Implement duplicate checks and distinct-concept override.
+11. Implement exact slug and exact normalized-title duplicate rejection, with ordinary deterministic search candidates.
 12. Implement user-owned Note deletion authorization.
 13. Keep local commits independent of Syncthing availability and remote Git state.
+14. Reject secret-bearing managed filenames and content before any staging.
 
 ### Tests
 
@@ -175,7 +181,6 @@ Given a fixture vault, an agent can discover a concept through the root index, s
 - any Syncthing conflict artifact blocks writes;
 - Syncthing being stopped or unavailable does not block writes;
 - exact slug and normalized title duplicates fail;
-- similar title requires explicit distinct confirmation;
 - one batch changes several concepts in one commit;
 - only transaction-owned paths are staged;
 - any pre-staged path blocks the transaction;
@@ -188,8 +193,10 @@ Given a fixture vault, an agent can discover a concept through the root index, s
 - every fsynced journal phase has deterministic doctor diagnosis and preview-first recovery;
 - deletion removes active content but remains recoverable from Git;
 - an agent cannot delete a user-owned Note without `human:donald` authorization and a source;
-- rename updates vault links; and
-- remote configuration and availability do not affect local commits.
+- rename updates vault links;
+- remote configuration and availability do not affect local commits;
+- managed writes reject secret-bearing filenames and content before staging; and
+- secret rejection leaves the Git index and managed targets unchanged.
 
 ### Gate
 
@@ -220,121 +227,61 @@ A newly initialized fixture vault can complete a multi-concept transaction with 
 
 ### Gate
 
-A concept can be modified as an external/unmanaged working-tree edit in an integration fixture, then reconciled, logged, and committed without losing attribution. The real Obsidian/Syncthing round trip is reserved for Milestones 10–11.
+A concept can be modified as an external/unmanaged working-tree edit in an integration fixture, then reconciled, logged, and committed without losing attribution. The real Obsidian/Syncthing round trip is reserved for Milestones 8–9.
 
-## 9. Milestone 5 — Session summaries and retries
+## 9. Milestone 5 — Native-summary checkpoints and lifecycle drain
 
 ### Work
 
-1. Implement the supervised durable event worker and queue.
-2. Implement session file creation and stable path rules.
-3. Materialize spooled context-access events into session Markdown.
-4. Implement idempotent checkpoint append and checkpoint index generation.
-5. Implement finalization, incomplete-session recovery, and status transitions.
-6. Define structured summarizer input/output schemas.
-7. Implement sanitized event/retry descriptors and retry policies.
-8. Implement `system/errors.md`, `system/status.md`, `memory retry`, and `memory doctor` session checks.
-9. Implement reusable-knowledge candidate validation and handoff to ordinary transactions.
+1. Implement durable non-hidden lifecycle `ready/`, `claimed/`, and unwatched `failed/` descriptors with atomic publication and idempotent event identities.
+2. Implement `memory worker --once`: on every start acquire one worker lock, recover claimed descriptors first, then atomically claim and process ready descriptors one at a time until both are empty.
+3. Delete a descriptor only after committed materialization; make commit-before-delete replay safe by event ID. Run bounded capped-backoff retries in the same invocation, move exhausted work to `failed/`, and make `memory retry` republish it. Do not add a timer or leave delayed work in `ready/`.
+4. Keep only configurable `worker.state_dir`; derive non-hidden `ready/`, `claimed/`, and `failed/` beneath it. Render both resolved `DirectoryNotEmpty=` paths into the user's systemd `.path`, target the `Type=oneshot` service with `WantedBy=default.target`, run `systemctl --user daemon-reload`, and enable the path and user lingering; document next-login recovery when lingering is unavailable.
+5. Implement session file creation, stable paths, idempotent checkpoint append, and checkpoint index generation.
+6. Store Pi's exposed `compactionEntry.summary` and stable compaction entry ID. For Hermes gateway events, bind persisted previous/current message-row high-water boundaries and an unambiguous isolated-summary candidate row ID/SHA-256 at descriptor publication; include those values in the versioned canonical event ID.
+7. Make the Hermes worker fetch only the exact bounded candidate row, repeat Hermes 0.20.0 standalone/merged carrier isolation, verify row ID/hash, and store only the isolated segment. When classification, isolation, or verification fails, record lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, other dialogue/tool output, synthesized text, or another model.
+8. Materialize spooled context-access and lifecycle state at checkpoints and always on reset, `/new`, and finalization.
+9. Implement finalization, incomplete-session recovery, status transitions, `system/errors.md`, `system/status.md`, `memory retry`, and `memory doctor` checks. Doctor detects failed/start-limited lifecycle path/service units and stranded queue state. Apply the same secret rejection/redaction policy to descriptors, worker diagnostics, and error state, including lifecycle files outside Git.
 
 ### Tests
 
 - one session ID maps to one evolving file;
-- repeated compactions append ordered checkpoints;
+- repeated native summaries append ordered checkpoints;
 - duplicate event ID is a no-op;
-- retry replaces a failure placeholder without duplicating the checkpoint;
-- minimal tool output policy is enforced in structured output validation;
-- access events are durable before checkpoint commit and become Obsidian-visible at the checkpoint;
-- finalization commits pending audit events;
-- editing completed checkpoint text preserves its anchor and Git retains the prior version;
-- abrupt session recovery marks status correctly;
-- lifecycle enqueue returns within its timeout and host termination immediately afterward does not lose the event;
-- summary failure never blocks the caller;
-- retry does not apply stale output over a newer checkpoint; and
+- atomic ready-to-claimed handling and one worker lock prevent duplicate concurrent drains;
+- a post-claim crash leaves recoverable work in `claimed/`, and the next invocation processes it before `ready/`;
+- a commit-before-descriptor-delete crash replays as an idempotent no-op and then deletes the descriptor;
+- `memory worker --once` drains claimed and ready backlog and exits;
+- retryable work exhausts bounded capped backoff in the same invocation, moves to unwatched `failed/`, and is republished only by `memory retry`;
+- failed descriptors remain sanitized and diagnosable without reactivating the path unit;
+- configuration exposes only `worker.state_dir`; queue paths are derived, and installation renders both resolved `DirectoryNotEmpty=` values, runs daemon-reload, targets the oneshot service, and activates on each non-empty backlog;
+- enabled user lingering recovers backlog after reboot without login, while disabled lingering recovers it at next login;
+- repeated hard worker crashes trigger systemd start-limit failure; `memory doctor` reports the failed path/service state and stranded queue, and recovery with `systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service` followed by `systemctl --user enable --now agent-memory-lifecycle.path` resumes draining after the crash is fixed;
+- Pi's exposed native summary/stable entry ID and Hermes's publication-bound boundaries/candidate row ID/isolated-segment hash are stored without a model call;
+- absent, ambiguous, or hash-mismatched native summary produces lifecycle metadata and `native summary unavailable` without preserved tails, archived/raw conversation rows, `pre_llm_call` history, or other dialogue/tool output;
+- access events are durable before checkpoint commit and materialize on checkpoint, reset, `/new`, and finalization;
+- a handler that completes descriptor publication permits recovery after immediate host termination; a handler that never runs is not claimed recoverable;
+- managed writes reject secret-bearing filenames/content, and lifecycle descriptors, worker diagnostics, notifications, and `system/errors.md` redact secrets and raw prompts in both vault and outside-Git state;
+- materialization failure never blocks the caller;
+- editing completed checkpoint text preserves its anchor and Git retains the prior version; and
 - no raw transcript is written to the vault.
 
 ### Gate
 
-A synthetic session with two compactions and finalization can terminate immediately after each enqueue and still produces, through the worker, one readable Markdown file with three indexed checkpoints, context-access history, exact models, and no routine tool dump.
+A synthetic session completes publication of native-summary and finalization descriptors, terminates immediately, and is drained by the dual-directory systemd-triggered `memory worker --once` into one readable Markdown file with indexed checkpoints and context access. Post-claim and commit-before-delete crash recovery pass. Exhausted work lands in sanitized unwatched failed state and succeeds only after `memory retry`. A descriptor without a resolvable native summary records `native summary unavailable`; no second model call, raw dialogue, `pre_llm_call` history, or routine tool dump occurs.
 
-## 10. Milestone 6 — Procedures and automatic skill promotion
-
-### Work
-
-1. Implement minimal use events containing timestamp, outcome, and source checkpoint.
-2. Derive successful use count only from explicit successful outcomes.
-3. Record failed-use lessons without incrementing success.
-4. Implement promotion eligibility checks for three successes, stable steps, a clear verification method, and target compatibility.
-5. Have the durable worker trigger promotion automatically when eligibility is reached.
-6. Generate Agent Skills-compliant `SKILL.md` packages.
-7. Select shared, Pi-only, or Hermes-only target, defaulting to shared.
-8. Keep the source concept as `type: Procedure`, shorten it, and link it bidirectionally with the skill in the same transaction.
-9. Validate resulting skill discovery metadata.
-
-### Tests
-
-- fewer than three successes cannot promote;
-- missing verification method cannot promote;
-- failed use does not increment success;
-- every use has timestamp, outcome, and stable source checkpoint;
-- actor, model, and detailed evidence remain discoverable through the source checkpoint;
-- successful count is derived rather than independently editable;
-- reaching eligibility queues automatic promotion exactly once;
-- omitted promotion target defaults to shared;
-- agent-specific tools require an agent-specific target;
-- skill frontmatter satisfies the Agent Skills standard;
-- the source remains a concise `Procedure` and no longer duplicates executable steps;
-- skill and procedure link to each other; and
-- promotion is one Git transaction and failure does not block session lifecycle.
-
-### Gate
-
-Focused integration tests show that a procedure with three fixture uses is promoted automatically to a loadable shared skill while retaining a concise source Procedure and provenance.
-
-## 11. Milestone 7 — Visibility snapshots; migration deferred
-
-This milestone is not migration or cutover. Native files remain authoritative, and no agent load path is changed.
+## 10. Milestone 6 — Pi adapter
 
 ### Work
 
-1. Copy Pi global `AGENTS.md` to `agents/pi/AGENTS.md` when present.
-2. Copy Hermes `SOUL.md`, `memories/USER.md`, and `memories/MEMORY.md` to their vault paths.
-3. Refuse non-regular files, secret-bearing content, ambiguous case variants, or existing vault targets that would be overwritten.
-4. Leave every native source unchanged and document that vault copies are snapshots.
-
-### Deferred work
-
-- all agent-file migration and native-path cutover;
-- symlink creation;
-- configuration and settings migration;
-- skill migration and bundled-skill classification;
-- reusable migration commands;
-- divergence handling and rollback tooling.
-
-### Tests
-
-- selected text files are copied byte-for-byte;
-- missing optional `AGENTS.md` is reported without failure;
-- existing vault targets are not overwritten;
-- `.env`, authentication files, state databases, and locks are never copied;
-- case-variant `SOUL.md` ambiguity requires resolution; and
-- native files remain unchanged.
-
-### Gate
-
-A temporary fake Pi/Hermes home copies only the four approved context files as snapshots without changing native files, changing load paths, importing secrets, or creating symlinks.
-
-## 12. Milestone 8 — Pi adapter
-
-### Work
-
-1. Re-read the installed Pi extension, compaction, session, skills, and environment documentation for the deployed version.
+1. Re-read the installed Pi extension, compaction, session, and environment documentation for the deployed version.
 2. Implement the global TypeScript extension using the `memory` CLI as its only memory-system boundary.
 3. Inject `memory/index.md` once per logical new session as visible context.
 4. Record injection audit in the durable spool.
-5. Enqueue `session_compact` events using stable saved-entry references.
-6. Enqueue finalization on new, resume, fork, and quit; ignore reload as a logical end.
-7. Have the worker use the captured active Pi model by default and support configured override.
-8. Show TUI notifications for enqueue failures and persistent worker failures.
+5. Atomically publish `session_compact` descriptors with stable saved-entry references, exposed native summaries, and host provenance.
+6. Publish finalization descriptors on new, resume, fork, and quit; ignore reload as a logical end.
+7. Include the active Pi model only as host provenance; do not call a summarizer.
+8. Show TUI notifications for publication and persistent worker failures.
 9. Add adapter version compatibility checks to `memory doctor`.
 
 ### Tests
@@ -344,49 +291,59 @@ A temporary fake Pi/Hermes home copies only the four approved context files as s
 - two compactions produce two idempotent checkpoints;
 - `/new` finalizes the old session before new-session injection;
 - model changes are recorded exactly;
-- summary failure does not cancel native session action;
-- immediate host termination after shutdown enqueue still permits worker recovery;
-- extension shutdown on quit durably enqueues pending audit references within the fixed timeout; and
+- native-summary materialization failure does not cancel native session action;
+- immediate host termination after completed descriptor publication still permits worker recovery, without claiming recovery when the handler did not run;
+- extension shutdown on quit durably publishes pending audit references within the fixed timeout; and
 - no raw session JSONL is copied.
 
 ### Gate
 
-Recorded Pi lifecycle events and a controlled Pi test invocation complete the adapter contract against a temporary vault. Production-vault and Obsidian validation are reserved for Milestones 10–11.
+Recorded Pi lifecycle events and a controlled Pi test invocation complete the adapter contract against a temporary vault. Production-vault and Obsidian validation are reserved for Milestones 8–9.
 
-## 13. Milestone 9 — Hermes adapter
+## 11. Milestone 7 — Hermes adapter
 
 ### Work
 
-1. Re-read the installed Hermes plugin, hooks, LLM access, context, sessions, and skills documentation for the deployed version.
+1. Re-read the installed Hermes plugin, hooks, context, and sessions documentation for the deployed version.
 2. Implement and enable a user plugin for CLI and gateway lifecycle, using the `memory` CLI as its only memory-system boundary.
-3. Inject the root index on the first turn of a new session and spool the injection audit.
-4. Bind exact model, session, platform, and chat context safely under concurrent gateway sessions.
-5. Implement a gateway `HOOK.yaml` handler for `session:compress` and enqueue stable event references.
-6. Enqueue finalization on `/new`, reset, gateway rotation/GC, and CLI exit.
-7. For Hermes CLI 0.20.0, capture reset/finalization and incorporate intermediate CLI compression at the next detectable checkpoint; do not patch Hermes core in the MVP.
-8. Use host-owned active-model completion by default and support configured override; record the provider/model actually returned.
-9. Notify the originating interface and authenticated Telegram owner DM where supported.
-10. Add compatibility checks to `memory doctor`.
+3. On every `pre_llm_call`, lazily and idempotently bind the current Hermes session and inject the root index only when the persisted injection identity is absent; do not depend on `on_session_start` for continued/resumed sessions.
+4. Persist injection identity, old/new compression lineage, and the current message-row high-water boundary across restart/resume. Bind exact model, session, platform, and chat context safely under concurrent gateway sessions, but use model provenance only from a separate reliable plugin context.
+5. Implement a gateway `HOOK.yaml` handler for `session:compress`. Treat its installed 0.20.0 payload—only `platform`, `session_id`, `old_session_id`, `in_place`, and `compression_count`—as a committed-compression signal. Under the adapter-state lock, query only bounded message row IDs, summary-classification metadata, and content; atomically publish the five fields, previous/current high-water boundaries, and nullable isolated-summary candidate row ID/SHA-256, with no summary/raw text, then persist the current boundary and lineage before returning.
+6. Compute the event ID from a versioned canonical serialization of every published identity field, including boundaries and nullable candidate identity, rather than the five hook fields alone. Make the worker order queued descriptors within each logical lineage by ascending message-row boundary, fetch each exact bounded row, re-isolate a recognized Hermes 0.20.0 standalone or merged summary segment using its prefix, merged delimiter, and end marker, verify row ID/hash, and store only the isolated segment. Never serialize preserved tail/live user content, archived/raw conversation rows, or `pre_llm_call` history.
+7. Publish finalization descriptors on `/new`, reset, gateway rotation/GC, and CLI exit so lifecycle/audit state is flushed.
+8. For Hermes CLI 0.20.0, record lifecycle metadata and `native summary unavailable` unless a separate reliable host surface exposes a classified native summary. Never reconstruct an intermediate interval or patch Hermes core.
+9. Do not invoke host-owned or configured model completion; the gateway hook does not expose model identity.
+10. Notify the originating interface and authenticated Telegram owner DM where supported.
+11. Add compatibility checks to `memory doctor`.
 
 ### Tests
 
 - CLI and Telegram sessions use distinct IDs;
-- first-turn injection happens once;
+- first-turn injection happens once, and every later `pre_llm_call` rebinds idempotently;
+- continued/resumed sessions bind and avoid duplicate injection when `on_session_start` is absent;
+- process restart preserves injection identity and old/new compression lineage;
+- the gateway payload contract rejects any assumption that summary, model, timestamp, or native event ID is present;
+- replaying the same exposed fields, boundaries, and candidate identity produces the same versioned deterministic event ID;
+- two in-place compressions published without draining bind successive non-overlapping message-row boundaries and later drain as distinct ordered event IDs/checkpoints;
+- after process restart with `compression_count` reset, persisted boundary/lineage produces another distinct ordered event ID/checkpoint rather than colliding with an older event;
 - repeated gateway in-place compression increments the same summary file;
-- rotated gateway compression maps old/new IDs without orphaning checkpoints;
-- Hermes CLI finalization incorporates any otherwise unobservable compressed interval without claiming an exact intermediate timestamp;
+- rotated gateway compression maps persisted old/new IDs without orphaning checkpoints;
+- the resolver fetches only the descriptor-bound row, re-isolates a recognized standalone carrier, verifies row ID/segment hash, and stores only that segment;
+- a recognized merged carrier stores only the isolated summary segment and excludes its preserved tail/live user content;
+- duplicate/misordered markers, multiple candidates, changed rows, and hash mismatch record `native summary unavailable`, while non-summary/raw rows and `pre_llm_call` history never enter a descriptor or checkpoint;
+- Hermes CLI reset/finalization records `native summary unavailable` when no separate reliable native summary is exposed;
 - `/new` finalizes the outgoing ID and binds the new ID;
 - concurrent Telegram sessions do not leak session context;
 - notifications cannot target a group or unknown user;
-- model/provider changes are recorded exactly;
+- model/provider changes are recorded only when available from reliable session-scoped plugin context;
 - failure does not prevent reset; and
 - `state.db` and legacy raw sessions remain outside the vault.
 
 ### Gate
 
-Recorded Hermes CLI/gateway lifecycle events and controlled local adapter invocations complete the contract against a temporary vault. Live authenticated Telegram and production-vault validation are reserved for Milestone 11.
+Recorded Hermes CLI/gateway lifecycle events and controlled local adapter invocations complete the contract against a temporary vault. Live authenticated Telegram and production-vault validation are reserved for Milestone 9.
 
-## 14. Milestone 10 — Syncthing, Obsidian, and manual private backup
+## 12. Milestone 8 — Syncthing, Obsidian, and manual private backup
 
 ### Work
 
@@ -403,7 +360,7 @@ Recorded Hermes CLI/gateway lifecycle events and controlled local adapter invoca
 
 A managed server concept creation appears in Obsidian without restart, a local Obsidian correction reaches the server and reconciles successfully, writes remain available during a Syncthing outage, and the user can push the resulting local commit manually.
 
-## 15. Milestone 11 — Full acceptance exercise
+## 13. Milestone 9 — Full acceptance exercise
 
 Run the following live scenario with evidence captured in an acceptance report:
 
@@ -413,17 +370,18 @@ Run the following live scenario with evidence captured in an acceptance report:
 4. Observe it in Obsidian.
 5. Start Hermes through authenticated Telegram and retrieve the same concept.
 6. Update it from Hermes with exact actor/model attribution.
-7. Trigger multiple Pi compactions and Hermes gateway compressions and verify one evolving session file per agent.
-8. For Hermes CLI, verify reset/finalization capture and the documented 0.20.0 intermediate-compression limitation.
-9. Run `/new` or reset and verify final checkpoints.
+7. Trigger multiple Pi compactions and two queued Hermes gateway compressions; verify Pi's exposed summaries and Hermes's publication-bound row ranges, isolated-summary identities/hashes, ordered distinct event IDs/checkpoints, and available provenance in one evolving session file per agent with no second model call. Restart Hermes, reset its compression count, and verify the persisted boundary still yields a distinct next event.
+8. Verify merged-carrier isolation excludes preserved tail/live user content. For ambiguous or hash-mismatched Hermes gateway summaries and Hermes CLI reset/finalization, verify unavailable summaries become `native summary unavailable`, not reconstructed text, archived/raw rows, or `pre_llm_call` history.
+9. Run `/new` or reset and verify final lifecycle/audit materialization.
 10. Edit a concept in Obsidian and reconcile it.
 11. Simulate a dirty targeted file and prove the agent cannot overwrite it.
 12. Simulate a Syncthing conflict copy and prove all writes fail closed.
 13. Stop Syncthing temporarily and prove ordinary writes remain available.
-14. Simulate summarizer failure and immediate host exit; prove native session flow continues, notifications appear, and `memory retry` succeeds.
-15. Inspect `memory/log.md`, concept metadata, session audit, and local Git history.
-16. Run `memory validate --strict` and `memory doctor`.
-17. Verify that no raw sessions or secrets exist in either repository.
+14. After completed descriptor publication, simulate post-claim crash, commit-before-delete crash, exhausted failure, and immediate host exit; prove native session flow continues, idempotent recovery works, failed work stays unwatched, notifications are redacted, and `memory retry` plus `memory worker --once` succeeds.
+15. Verify configured-state rendering of both `DirectoryNotEmpty=` paths, lingering reboot recovery, and next-login recovery without lingering. Force repeated hard worker crashes through the systemd start limit; verify `memory doctor` reports failed units and stranded queue state, diagnose/fix the crash, reset both units with the documented command, and re-enable/start the path.
+16. Inspect `memory/log.md`, concept metadata, session audit, and local Git history.
+17. Run `memory validate --strict` and `memory doctor`.
+18. Verify that no raw sessions or secrets exist in either repository or in lifecycle/error state outside Git.
 
 ### Required evidence
 
@@ -435,9 +393,9 @@ Run the following live scenario with evidence captured in an acceptance report:
 - failure/retry records; and
 - final validation and doctor reports.
 
-Focused integration suites separately cover pre-staged-path blocking, Note deletion authorization, substantial-change verification invalidation, procedure-use events, and automatic skill promotion.
+Focused integration suites separately cover pre-staged-path blocking, Note deletion authorization, substantial-change verification invalidation, managed-write secret rejection, lifecycle descriptor/error redaction outside Git, post-claim and commit-before-delete replay, failed-descriptor republication, restart/resume binding, and absence of second-pass summarization.
 
-## 16. Continuous validation commands
+## 14. Continuous validation commands
 
 The eventual repository should provide stable commands such as:
 
@@ -459,25 +417,25 @@ uv run pytest tests/integration/test_hermes_adapter.py
 
 No implementation milestone is complete merely because code was written; its milestone gate must pass.
 
-## 17. Test strategy
+## 15. Test strategy
 
-### 17.1 Unit tests
+### 15.1 Unit tests
 
-Pure parsing, validation, ranking, rendering, duplicate detection, and state transition behavior.
+Pure parsing, validation, ranking, rendering, exact duplicate rejection, and state transition behavior.
 
-### 17.2 Integration tests
+### 15.2 Integration tests
 
-Temporary Git repositories, subprocess CLI execution, dirty-file behavior, pre-staged-path rejection, exact-path commit staging, Syncthing conflict detection and outage behavior, lock contention, crash-journal phases, recovery, and initial agent-file copying.
+Temporary Git repositories, subprocess CLI execution, managed-write secret rejection, dirty-file behavior, pre-staged-path rejection, exact-path commit staging, Syncthing conflict detection and outage behavior, lock contention, crash-journal phases, recovery, lifecycle descriptor/error redaction outside Git, and lifecycle descriptor draining.
 
-### 17.3 Adapter contract tests
+### 15.3 Adapter contract tests
 
 Recorded/synthetic native lifecycle events are fed to adapters. These tests isolate version-specific event mapping from core session behavior.
 
-### 17.4 End-to-end tests
+### 15.4 End-to-end tests
 
 Live Pi, Hermes CLI, Hermes Telegram DM, Syncthing, and Obsidian. External surfaces are not adequately validated by mocks alone. Private-remote setup and manual push are validated separately as an operational backup step.
 
-### 17.5 Fault injection
+### 15.5 Fault injection
 
 At minimum, inject failure:
 
@@ -485,9 +443,12 @@ At minimum, inject failure:
 - before and after Git staging;
 - before commit;
 - after commit;
-- during summary generation;
+- during native-summary checkpoint materialization;
 - during notification;
-- immediately after lifecycle enqueue and host termination;
+- immediately after completed lifecycle descriptor publication and host termination;
+- immediately after ready-to-claimed movement;
+- after checkpoint commit but before claimed-descriptor deletion;
+- through retry exhaustion and failed-descriptor republication;
 - while a target is dirty;
 - with an unrelated staged path;
 - under lock contention;
@@ -495,7 +456,7 @@ At minimum, inject failure:
 - while Syncthing is unavailable; and
 - with a Syncthing conflict artifact present.
 
-## 18. Operational runbook requirements
+## 16. Operational runbook requirements
 
 Before production use, documentation must cover:
 
@@ -504,19 +465,26 @@ Before production use, documentation must cover:
 - Syncthing setup and exclusions;
 - vault initialization;
 - Pi and Hermes adapter installation;
-- initial visibility snapshot copy, the explicit migration deferral, and the snapshot limitation;
+- systemd user `.path` and `Type=oneshot` installation, rendering both `DirectoryNotEmpty=` entries from `worker.state_dir`, daemon-reload, `WantedBy=default.target`, path enablement, user lingering, reboot-without-login and next-login recovery, `memory worker --once`, post-claim/commit-before-delete recovery, worker-lock diagnosis, unwatched failed descriptors, `memory retry` republication, start-limit diagnosis, and exact reset-failed/re-enable recovery commands;
+- explicit deferral of agent-file snapshots/migration and managed `agents/`/`skills/` directories;
 - search and mutation examples;
 - direct edit reconciliation;
-- duplicate resolution;
+- exact duplicate resolution;
 - Syncthing conflict resolution;
 - transaction recovery;
-- summary retry;
-- skill promotion;
+- lifecycle checkpoint retry and `native summary unavailable` handling;
 - backup restoration;
 - secret rotation following accidental exposure; and
 - complete uninstall without deleting the vault.
 
-## 19. Feature-creep gates
+For a repeated hard-crash/start-limit incident, the runbook diagnoses and fixes the worker crash before clearing state, then uses exactly:
+
+```bash
+systemctl --user reset-failed agent-memory-lifecycle.path agent-memory-lifecycle.service
+systemctl --user enable --now agent-memory-lifecycle.path
+```
+
+## 17. Feature-creep gates
 
 The following work requires a separate proposal based on observed MVP evidence:
 
@@ -524,15 +492,15 @@ The following work requires a separate proposal based on observed MVP evidence:
 |---|---|
 | Embeddings/vector search | documented retrieval misses not solved by metadata/full text |
 | Reranking | irrelevant deterministic result sets with measurable task impact |
-| Automatic workflow discovery and adaptive refinement | recurring tasks that are not already represented by explicit Procedure use events, measured outcomes, and a fixed evaluation approach; deterministic promotion of an existing eligible Procedure remains in the MVP |
+| Automatic extraction, workflow discovery, and procedure-to-skill pipeline | observed recurring work plus a separately approved design for extraction, use events, counters, eligibility, promotion, generated `SKILL.md`, skill directories, and load paths |
 | Typed relations | queries that cannot be expressed reliably through links and prose |
 | Direct-edit watcher | reconciliation burden high enough to justify daemon complexity |
-| Agent-file/configuration/skill migration and symlink cutover | a separately approved migration, backup, validation, divergence, and rollback design |
+| Agent-file snapshots, managed `agents/`/`skills/` directories, migration, and symlink cutover | a separately approved copy/migration, secret-audit, backup, validation, divergence, and rollback design |
 | Native Hermes memory logging | meaningful unobserved changes causing audit gaps |
 | Hard channel isolation | Hermes begins serving untrusted users or groups |
 | Retrieval optimization | baseline access logs and task outcomes sufficient for evaluation |
 
-## 20. Initial risks and mitigations
+## 18. Initial risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -541,24 +509,25 @@ The following work requires a separate proposal based on observed MVP evidence:
 | Manual edits leave a dirty tree | block pre-staged files, use exact-path staging, targeted aborts, and explicit reconcile |
 | Generated indexes absorb unreconciled changes | incremental index updates; full rebuild dirty check |
 | Multi-file process crash | external sibling transaction journals, backups, doctor diagnosis, and preview-first recovery |
-| Hermes gateway session context leaks between chats | use native context variables/explicit adapter context, not global environment alone |
-| Session summarization adds latency or cost | enqueue-first lifecycle callbacks; supervised worker; checkpoint boundaries only; active model configurable |
-| Hermes CLI 0.20 lacks a compression event | capture gateway compression and CLI reset/finalization; do not patch core in the MVP |
+| Hermes gateway session context leaks between chats or across resume | lazily bind on every `pre_llm_call`; persist injection identity and old/new compression lineage; avoid process-global context |
+| Lifecycle work blocks agent reset/exit | bounded atomic descriptor publication; dual-directory systemd path activation; one worker lock; bounded in-invocation retry; unwatched failed state |
+| Lifecycle handler never runs before abrupt exit | document that durability begins only after completed atomic descriptor publication; do not claim impossible recovery |
+| Hermes 0.20 compression surfaces are incomplete | treat gateway hook as a committed signal; bind persisted row boundaries and isolated-segment row/hash at publication; verify only that exact bounded candidate; record unavailable on ambiguity; do not reconstruct or patch core |
+| Repeated worker crashes exhaust systemd start limits | have `memory doctor` report failed units and stranded queues; diagnose first, reset failed path/service units, then re-enable/start the path |
 | Agents create duplicate or low-quality concepts | mandatory duplicate search, 600-word limit, structured metadata, and Git reviewability |
 | Work content reaches an unsuitable remote | the user reviews the private remote and pushes manually; the CLI never auto-pushes |
-| Skills duplicate procedures | automatic promotion keeps a concise source Procedure linked to the canonical executable skill |
 | Native upgrades break adapters | compatibility checks, version pinning during MVP, live upgrade validation |
 
-## 21. Recommended first implementation slice
+## 19. Recommended first implementation slice
 
 The first coding slice should stop after Milestone 3 and provide a usable local CLI against a temporary fixture vault:
 
 - initialize and validate OKF concepts;
 - deterministic search/show;
 - create/update/delete/rename;
-- duplicate detection;
+- exact duplicate rejection;
 - transaction lock and conflict protection;
 - generated index and log; and
 - exact-path Git commits.
 
-This slice proves the storage and safety model before agent hooks, model calls, Syncthing, or the initial agent-file copy can obscure basic failures.
+This slice proves the storage and safety model before agent hooks, lifecycle activation, or Syncthing can obscure basic failures.
