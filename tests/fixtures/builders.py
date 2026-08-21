@@ -39,9 +39,16 @@ def build_vault(root: Path, concepts: Mapping[str, str] | None = None) -> Path:
     memory = root / "memory"
     concept_dir = memory / "concepts"
     concept_dir.mkdir(parents=True)
-    (memory / "index.md").write_text("# Agent Memory\n", encoding="utf-8")
+    concept_values = concepts or {"example-concept": concept_text()}
+    (memory / "index.md").write_text(
+        '---\nokf_version: "0.2"\n---\n# Agent Memory\n\n[Concepts](concepts/index.md)\n',
+        encoding="utf-8",
+    )
     (memory / "log.md").write_text("# Log\n", encoding="utf-8")
-    (concept_dir / "index.md").write_text("# Concepts\n", encoding="utf-8")
-    for slug, text in sorted((concepts or {"example-concept": concept_text()}).items()):
+    entries = [f"- [{slug}]({slug}.md)" for slug in sorted(concept_values)]
+    (concept_dir / "index.md").write_text(
+        "# Concepts\n\n" + "\n".join(entries) + "\n", encoding="utf-8"
+    )
+    for slug, text in sorted(concept_values.items()):
         (concept_dir / f"{slug}.md").write_text(text, encoding="utf-8")
     return root

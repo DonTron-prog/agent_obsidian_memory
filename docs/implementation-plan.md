@@ -123,84 +123,88 @@ The user confirms that the product specification captures the intended system, i
 
 ## 6. Milestone 2 — Read-only vault and search
 
+**Status: Complete**
+
 ### Work
 
-1. Implement vault discovery and the OKF conformance boundary.
-2. Implement deterministic root/concept index parsing.
-3. Implement metadata and full-text scanning over Markdown.
-4. Implement the fixed explainable result ordering and filters.
-5. Implement `memory search`, `memory show`, `memory validate`, and JSON output.
-6. Implement read-time staleness and trust-tier presentation.
-7. Implement locked atomic append to the durable per-session audit spool with explicit session context. Session Markdown materialization remains in Milestone 5.
+1. [x] Implement vault discovery and the OKF conformance boundary.
+2. [x] Implement deterministic root/concept index parsing.
+3. [x] Implement metadata and full-text scanning over Markdown.
+4. [x] Implement the fixed explainable result ordering and filters.
+5. [x] Implement `memory search`, `memory show`, `memory validate`, and JSON output.
+6. [x] Implement read-time staleness and trust-tier presentation.
+7. [x] Implement locked atomic append to the durable per-session audit spool with explicit session context. Session Markdown materialization remains in Milestone 5.
 
 ### Tests
 
-- exact slug/title outranks body-only matches;
-- type and scope filters are exact;
-- stale and verification-tier filters (`unverified`, `machine-confirmed`, and `human-reviewed`) behave as specified;
-- result order is stable across runs;
-- search explains matched fields;
-- search does not require a generated index to be correct;
-- show resolves full and unambiguous short IDs;
-- path traversal is rejected;
-- access events record agent, model, query/reason, and concepts in the non-vault audit spool;
-- concurrent append and process-exit tests preserve complete JSONL records;
-- direct human reads may opt out of session audit; and
-- concurrent readers do not block each other.
+- [x] exact slug/title outranks body-only matches;
+- [x] type and scope filters are exact;
+- [x] stale and verification-tier filters (`unverified`, `machine-confirmed`, and `human-reviewed`) behave as specified;
+- [x] result order is stable across runs;
+- [x] search explains matched fields;
+- [x] search does not require a generated index to be correct;
+- [x] show resolves full and unambiguous short IDs;
+- [x] path traversal is rejected;
+- [x] access events record agent, model, query/reason, and concepts in the non-vault audit spool;
+- [x] concurrent append and process-exit tests preserve complete JSONL records;
+- [x] direct human reads may opt out of session audit; and
+- [x] concurrent readers do not block each other.
 
 ### Gate
 
-Given a fixture vault, an agent can discover a concept through the root index, search it deterministically, open it, and durably spool a correct context-access event without modifying a synchronized vault file.
+- [x] Given a fixture vault, an agent can discover a concept through the root index, search it deterministically, open it, and durably spool a correct context-access event without modifying a synchronized vault file.
 
 ## 7. Milestone 3 — Transaction engine and managed writes
 
+**Status: Complete**
+
 ### Work
 
-1. Implement `memory init`, the vault skeleton, initial root files, and the nine-view `memories.base`.
-2. Implement global writer lock and stale-lock diagnostics.
-3. Implement Syncthing conflict-file detection without a REST API dependency.
-4. Implement Git status parsing by exact path and block any pre-existing staged entry.
-5. Implement `/home/donald/.agent-memory-txn/`, same-filesystem verification, fsynced phase journals, backups, compare-and-replace, rollback, and explicit recovery.
-6. Recheck target hashes immediately before replacement and abort on detected concurrent changes.
-7. Implement incremental concept index updates.
-8. Implement OKF `log.md` prepending.
-9. Implement exact-path staging and commit metadata.
-10. Implement create, update, delete, rename, and batch apply.
-11. Implement exact slug and exact normalized-title duplicate rejection, with ordinary deterministic search candidates.
-12. Implement user-owned Note deletion authorization.
-13. Keep local commits independent of Syncthing availability and remote Git state.
-14. Reject secret-bearing managed filenames and content before any staging.
+1. [x] Implement `memory init`, the vault skeleton, initial root files, and the nine-view `memories.base`.
+2. [x] Implement global writer lock and stale-lock diagnostics.
+3. [x] Implement Syncthing conflict-file detection without a REST API dependency.
+4. [x] Implement Git status parsing by exact path and block any pre-existing staged entry.
+5. [x] Implement `/home/donald/.agent-memory-txn/`, same-filesystem verification, fsynced phase journals, backups, compare-and-replace, rollback, and explicit recovery.
+6. [x] Recheck target hashes immediately before replacement and abort on detected concurrent changes.
+7. [x] Implement incremental concept index updates.
+8. [x] Implement OKF `log.md` prepending.
+9. [x] Implement exact-path staging and commit metadata.
+10. [x] Implement create, update, delete, rename, and batch apply.
+11. [x] Implement exact slug and exact normalized-title duplicate rejection, with ordinary deterministic search candidates.
+12. [x] Implement user-owned Note deletion authorization.
+13. [x] Keep local commits independent of Syncthing availability and remote Git state.
+14. [x] Reject secret-bearing managed filenames and content before any staging.
 
 ### Tests
 
-- init is idempotent and non-destructive;
-- generated `memories.base` contains exactly the nine required views;
-- the transaction state directory must be outside the vault and on the same filesystem;
-- concurrent writes serialize;
-- lock timeout reports owner metadata;
-- any Syncthing conflict artifact blocks writes;
-- Syncthing being stopped or unavailable does not block writes;
-- exact slug and normalized title duplicates fail;
-- one batch changes several concepts in one commit;
-- only transaction-owned paths are staged;
-- any pre-staged path blocks the transaction;
-- unrelated unstaged files remain dirty and uncommitted;
-- a dirty target aborts without changing it;
-- dirty `index.md` or `log.md` aborts relevant writes;
-- incremental index updates do not absorb unrelated dirty concept metadata;
-- a synchronized change observed before replacement causes an abort;
-- rollback occurs only when the current hash is the known transaction output;
-- every fsynced journal phase has deterministic doctor diagnosis and preview-first recovery;
-- deletion removes active content but remains recoverable from Git;
-- an agent cannot delete a user-owned Note without `human:donald` authorization and a source;
-- rename updates vault links;
-- remote configuration and availability do not affect local commits;
-- managed writes reject secret-bearing filenames and content before staging; and
-- secret rejection leaves the Git index and managed targets unchanged.
+- [x] init is idempotent and non-destructive;
+- [x] generated `memories.base` contains exactly the nine required views;
+- [x] the transaction state directory must be outside the vault and on the same filesystem;
+- [x] concurrent writes serialize;
+- [x] lock timeout reports owner metadata;
+- [x] any Syncthing conflict artifact blocks writes;
+- [x] Syncthing being stopped or unavailable does not block writes;
+- [x] exact slug and normalized title duplicates fail;
+- [x] one batch changes several concepts in one commit;
+- [x] only transaction-owned paths are staged;
+- [x] any pre-staged path blocks the transaction;
+- [x] unrelated unstaged files remain dirty and uncommitted;
+- [x] a dirty target aborts without changing it;
+- [x] dirty `index.md` or `log.md` aborts relevant writes;
+- [x] incremental index updates do not absorb unrelated dirty concept metadata;
+- [x] a synchronized change observed before replacement causes an abort;
+- [x] rollback occurs only when the current hash is the known transaction output;
+- [x] every fsynced journal phase has deterministic doctor diagnosis and preview-first recovery;
+- [x] deletion removes active content but remains recoverable from Git;
+- [x] an agent cannot delete a user-owned Note without `human:donald` authorization and a source;
+- [x] rename updates vault links;
+- [x] remote configuration and availability do not affect local commits;
+- [x] managed writes reject secret-bearing filenames and content before staging; and
+- [x] secret rejection leaves the Git index and managed targets unchanged.
 
 ### Gate
 
-A newly initialized fixture vault can complete a multi-concept transaction with fault injection at every write/commit boundary without losing user content or staging unrelated files.
+- [x] A newly initialized fixture vault can complete a multi-concept transaction with fault injection at every write/commit boundary without losing user content or staging unrelated files.
 
 ## 8. Milestone 4 — Human reconciliation and verification
 
