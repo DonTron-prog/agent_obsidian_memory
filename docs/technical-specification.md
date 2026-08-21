@@ -501,7 +501,9 @@ memory recover --transaction <id> [--apply]
 
 ```bash
 memory search <query> [--type TYPE] [--scope SCOPE] [--tag TAG]
-              [--creator ACTOR] [--status STATUS] [--stale]
+              [--creator ACTOR] [--status STATUS]
+              [--verification unverified|machine-confirmed|human-reviewed]
+              [--stale]
               [--limit N] [--reason TEXT] [--json]
 memory show <concept-id> [--reason TEXT] [--no-audit] [--json]
 ```
@@ -598,7 +600,7 @@ The deterministic default rank is:
 3. title prefix/substring;
 4. tag and description matches;
 5. body matches;
-6. stable path/title tie-break.
+6. case-insensitive title, then concept ID tie-break.
 
 The CLI explains which fields matched. This ordering is fixed for the MVP and has no configurable weights.
 
