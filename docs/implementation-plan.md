@@ -208,30 +208,32 @@ The user confirms that the product specification captures the intended system, i
 
 ## 8. Milestone 4 — Human reconciliation and verification
 
+**Status: Complete**
+
 ### Work
 
-1. Implement `memory reconcile` for direct Obsidian edits.
-2. Preserve original creation metadata.
-3. Attribute reconciled content to `human:donald` without a model.
-4. Implement `memory verify`, explicit human authorization provenance, verification invalidation, and OKF trust-tier display.
-5. Implement full index rebuild with dirty-corpus safeguards.
-6. Add conflict-resolution guidance to error output.
+1. [x] Implement `memory reconcile` for direct Obsidian edits.
+2. [x] Preserve original creation metadata.
+3. [x] Attribute reconciled content to `human:donald` without a model.
+4. [x] Implement `memory verify`, explicit human authorization provenance, verification invalidation, and OKF trust-tier display.
+5. [x] Implement full index rebuild with dirty-corpus safeguards.
+6. [x] Add conflict-resolution guidance to error output.
 
 ### Tests
 
-- direct body correction reconciles and commits;
-- direct description change updates the generated index;
-- direct attempt to alter `created` is rejected or restored;
-- oversized direct edit fails without overwrite;
-- human verification occurs only through explicit command intent and an authorization source or interactive confirmation;
-- meaningful content/source changes clear current verification, while rename-only and verification-only changes do not;
-- verification appends rather than destroys independent machine checks;
-- reconcile does not stage another dirty concept; and
-- full rebuild refuses unreconciled edits.
+- [x] direct body correction reconciles and commits;
+- [x] direct description change updates the generated index;
+- [x] direct attempt to alter `created` is rejected or restored;
+- [x] oversized direct edit fails without overwrite;
+- [x] human verification occurs only through explicit command intent and an authorization source or interactive confirmation;
+- [x] meaningful content/source changes clear current verification, while rename-only and verification-only changes do not;
+- [x] verification appends rather than destroys independent machine checks;
+- [x] reconcile does not stage another dirty concept; and
+- [x] full rebuild refuses unreconciled edits.
 
 ### Gate
 
-A concept can be modified as an external/unmanaged working-tree edit in an integration fixture, then reconciled, logged, and committed without losing attribution. The real Obsidian/Syncthing round trip is reserved for Milestones 8–9.
+- [x] A concept can be modified as an external/unmanaged working-tree edit in an integration fixture, then reconciled, logged, and committed without losing attribution. The real Obsidian/Syncthing round trip is reserved for Milestones 8–9.
 
 ## 9. Milestone 5 — Native-summary checkpoints and lifecycle drain
 

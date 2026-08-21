@@ -10,6 +10,7 @@ from agent_memory.transactions import (
     TransactionError,
     execute_transaction,
     incomplete_transactions,
+    syncthing_conflict_message,
     syncthing_conflicts,
 )
 
@@ -193,7 +194,7 @@ def initialize_vault(
         raise TransactionError("transaction state directory must be on the same filesystem")
     conflicts = syncthing_conflicts(root)
     if conflicts:
-        raise TransactionError(f"Syncthing conflict artifacts block writes: {', '.join(conflicts)}")
+        raise TransactionError(syncthing_conflict_message(conflicts))
 
     with writer_lock(
         state_dir / "writer.lock",
@@ -209,9 +210,7 @@ def initialize_vault(
             raise TransactionError(f"pre-existing staged paths block writes: {', '.join(staged)}")
         conflicts = syncthing_conflicts(root)
         if conflicts:
-            raise TransactionError(
-                f"Syncthing conflict artifacts block writes: {', '.join(conflicts)}"
-            )
+            raise TransactionError(syncthing_conflict_message(conflicts))
         pending = incomplete_transactions(state_dir, root)
         if pending:
             raise TransactionError(

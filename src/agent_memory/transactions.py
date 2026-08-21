@@ -130,6 +130,14 @@ def syncthing_conflicts(root: Path) -> tuple[str, ...]:
     return tuple(sorted(conflicts))
 
 
+def syncthing_conflict_message(conflicts: tuple[str, ...]) -> str:
+    return (
+        f"Syncthing conflict artifacts block writes: {', '.join(conflicts)}. "
+        "Resolve conflict copies manually, reconcile changed concepts with memory reconcile, "
+        "then run memory doctor."
+    )
+
+
 def _validate_outputs(
     outputs: Mapping[str, bytes | None],
     *,
@@ -412,18 +420,27 @@ def execute_transaction(
     allow_long: bool = False,
     dry_run: bool = False,
     fault_hook: Callable[[str], None] | None = None,
+    adopted_paths: Mapping[str, str | None] | None = None,
 ) -> TransactionResult:
     vault = vault.resolve()
     requested = {_safe_relative(path): content for path, content in outputs.items()}
+    adopted = {_safe_relative(path): expected for path, expected in (adopted_paths or {}).items()}
+    if not adopted.keys() <= requested.keys():
+        raise TransactionError("adopted paths must be transaction outputs")
+    if len(adopted) > 1 or any(
+        Path(path).parent != Path("memory/concepts")
+        or Path(path).name == "index.md"
+        or Path(path).suffix != ".md"
+        for path in adopted
+    ):
+        raise TransactionError("only one reconciled concept path may be adopted")
     normalized: dict[str, bytes | None] = {}
     for path, content in requested.items():
         current_hash = file_hash(vault / path)
         new_hash = hashlib.sha256(content).hexdigest() if content is not None else None
-        if current_hash != new_hash:
+        if current_hash != new_hash or path in adopted:
             normalized[path] = content
     changed = tuple(sorted(normalized))
-    if not changed:
-        raise TransactionError("transaction has no changes")
     _validate_outputs(
         normalized,
         configured_types=configured_types,
@@ -434,17 +451,30 @@ def execute_transaction(
     ensure_repository(vault, branch)
     conflicts = syncthing_conflicts(vault)
     if conflicts:
-        raise TransactionError(f"Syncthing conflict artifacts block writes: {', '.join(conflicts)}")
+        raise TransactionError(syncthing_conflict_message(conflicts))
     pending = incomplete_transactions(state_dir, vault)
     if pending:
         raise TransactionError(f"incomplete transactions require recovery: {', '.join(pending)}")
     staged = staged_paths(vault)
     if staged:
         raise TransactionError(f"pre-existing staged paths block writes: {', '.join(staged)}")
-    dirty = dirty_paths(vault, changed)
+    if set(dirty_paths(vault, tuple(sorted(adopted)))) != adopted.keys():
+        raise TransactionError("adopted paths must have working-tree changes")
+    for path, expected in adopted.items():
+        if file_hash(vault / path) != expected:
+            raise TransactionError(f"adopted target changed before transaction: {path}")
+    dirty = dirty_paths(vault, tuple(path for path in requested if path not in adopted))
     if dirty:
-        raise TransactionError(f"transaction targets have uncommitted changes: {', '.join(dirty)}")
-    baselines = {path: file_hash(vault / path) for path in changed}
+        raise TransactionError(
+            f"transaction targets have uncommitted changes: {', '.join(dirty)}. "
+            "Reconcile intentional direct concept edits with memory reconcile; "
+            "resolve derived-file edits manually."
+        )
+    if not changed:
+        raise TransactionError("transaction has no changes")
+    baselines = {
+        path: adopted[path] if path in adopted else file_hash(vault / path) for path in changed
+    }
     if dry_run:
         return TransactionResult("dry-run", changed, None, True)
 

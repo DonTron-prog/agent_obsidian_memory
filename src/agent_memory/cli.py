@@ -19,7 +19,12 @@ from agent_memory.config import ConfigError, load_config
 from agent_memory.git import ensure_repository, staged_paths
 from agent_memory.initialization import initialize_vault
 from agent_memory.locking import writer_lock
-from agent_memory.mutations import MutationContext, apply_operations
+from agent_memory.mutations import (
+    MutationContext,
+    apply_operations,
+    rebuild_index,
+    reconcile_concept,
+)
 from agent_memory.search import (
     SearchFilters,
     is_stale,
@@ -114,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--description", required=True)
     create.add_argument("--body-file", required=True)
     create.add_argument("--source", action="append", default=[])
+    create.add_argument("--resource")
     create.add_argument("--slug")
     create.add_argument("--tag", action="append", default=[])
     create.add_argument("--status")
@@ -129,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--title")
     update.add_argument("--description")
     update.add_argument("--source", action="append")
+    update.add_argument("--resource")
     update.add_argument("--tag", action="append")
     update.add_argument("--status")
     update.add_argument("--allow-long", action="store_true")
@@ -146,6 +153,26 @@ def build_parser() -> argparse.ArgumentParser:
     rename.add_argument("new_slug")
     rename.add_argument("--reason", required=True)
     _add_mutation_options(rename, summary=False)
+
+    verify = commands.add_parser("verify", help="record explicit human verification")
+    verify.add_argument("concept_id")
+    verify.add_argument("--authorization-source")
+    verify.add_argument("--note")
+    _add_mutation_options(verify)
+
+    reconcile = commands.add_parser("reconcile", help="adopt one direct concept edit")
+    reconcile.add_argument("concept_id")
+    reconcile.add_argument("--summary", required=True)
+    reconcile.add_argument("--dry-run", action="store_true")
+    reconcile.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(reconcile)
+
+    rebuild = commands.add_parser(
+        "rebuild-index", help="fully rebuild the index from a clean concept corpus"
+    )
+    rebuild.add_argument("--dry-run", action="store_true")
+    rebuild.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(rebuild)
 
     apply = commands.add_parser("apply", help="apply a version-1 batch transaction")
     apply.add_argument("transaction_file")
@@ -498,6 +525,7 @@ def _single_operation(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
                 "description": args.description,
                 "body_file": args.body_file,
                 "sources": args.source,
+                "resource": args.resource,
                 "slug": args.slug,
                 "tags": args.tag or None,
                 "status": args.status,
@@ -517,6 +545,7 @@ def _single_operation(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
                 "title": args.title,
                 "description": args.description,
                 "sources": args.source,
+                "resource": args.resource,
                 "tags": args.tag,
                 "status": args.status,
                 "allow_long": args.allow_long,
@@ -534,6 +563,18 @@ def _single_operation(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
                 }
             ),
             args.reason,
+        )
+    if args.command == "verify":
+        return (
+            _clean_mapping(
+                {
+                    "action": "verify",
+                    "id": args.concept_id,
+                    "authorization_source": args.authorization_source,
+                    "note": args.note,
+                }
+            ),
+            args.summary or f"Verify {args.concept_id}",
         )
     return {"action": "rename", "id": args.concept_id, "new_slug": args.new_slug}, args.reason
 
@@ -553,6 +594,14 @@ def _read_batch(path: str) -> dict[str, Any]:
 
 def _mutate(args: argparse.Namespace) -> int:
     config, vault = _config_and_vault(args)
+    interactive_verification = False
+    if args.command == "verify" and args.authorization_source is None:
+        if not sys.stdin.isatty():
+            raise ValueError("noninteractive human verification requires --authorization-source")
+        answer = input(f"Confirm human verification of {args.concept_id}? [y/N] ")
+        if answer.strip().casefold() not in {"y", "yes"}:
+            raise ValueError("human verification was not confirmed")
+        interactive_verification = True
     if args.command == "apply":
         batch = _read_batch(args.transaction_file)
         actor = batch.get("actor")
@@ -570,7 +619,11 @@ def _mutate(args: argparse.Namespace) -> int:
     else:
         operation, summary = _single_operation(args)
         operations = [operation]
-        context = _mutation_context(args)
+        context = (
+            MutationContext(str(config["identity"]["human"]))
+            if interactive_verification
+            else _mutation_context(args)
+        )
     result = apply_operations(
         vault,
         config,
@@ -578,6 +631,7 @@ def _mutate(args: argparse.Namespace) -> int:
         context=context,
         summary=summary,
         dry_run=args.dry_run,
+        interactive_verification=interactive_verification,
     )
     payload = {
         "transaction_id": result.transaction.transaction_id,
@@ -595,6 +649,52 @@ def _mutate(args: argparse.Namespace) -> int:
             print(f"Commit: {result.transaction.commit_hash}")
         if result.duplicate_candidates:
             print(f"Candidates: {', '.join(result.duplicate_candidates)}")
+    return 0
+
+
+def _reconcile(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    result = reconcile_concept(
+        vault,
+        config,
+        args.concept_id,
+        summary=args.summary,
+        dry_run=args.dry_run,
+    )
+    payload = {
+        "transaction_id": result.transaction.transaction_id,
+        "changed_paths": list(result.transaction.changed_paths),
+        "commit_hash": result.transaction.commit_hash,
+        "dry_run": result.transaction.dry_run,
+    }
+    if args.json_output:
+        _json(payload)
+    else:
+        mode = "Would change" if result.transaction.dry_run else "Changed"
+        print(f"{mode}: {', '.join(result.transaction.changed_paths)}")
+        if result.transaction.commit_hash:
+            print(f"Commit: {result.transaction.commit_hash}")
+    return 0
+
+
+def _rebuild_index(args: argparse.Namespace) -> int:
+    config, vault = _config_and_vault(args)
+    result = rebuild_index(vault, config, dry_run=args.dry_run)
+    payload = {
+        "transaction_id": result.transaction.transaction_id,
+        "changed_paths": list(result.transaction.changed_paths),
+        "commit_hash": result.transaction.commit_hash,
+        "dry_run": result.transaction.dry_run,
+    }
+    if args.json_output:
+        _json(payload)
+    elif result.transaction.changed_paths:
+        mode = "Would change" if result.transaction.dry_run else "Changed"
+        print(f"{mode}: {', '.join(result.transaction.changed_paths)}")
+        if result.transaction.commit_hash:
+            print(f"Commit: {result.transaction.commit_hash}")
+    else:
+        print("Concept index is already current.")
     return 0
 
 
@@ -635,6 +735,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "update": _mutate,
         "delete": _mutate,
         "rename": _mutate,
+        "verify": _mutate,
+        "reconcile": _reconcile,
+        "rebuild-index": _rebuild_index,
         "apply": _mutate,
         "recover": _recover,
     }

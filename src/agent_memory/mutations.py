@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import re
 from collections.abc import Mapping, Sequence
@@ -14,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 
 from ruamel.yaml.comments import CommentedMap
 
-from agent_memory.git import head_concept_paths, show_file
+from agent_memory.git import dirty_paths, head_concept_paths, show_file
 from agent_memory.locking import writer_lock
 from agent_memory.markdown import FrontmatterDocument, parse_frontmatter, render_frontmatter
 from agent_memory.models import Actor, ActorKind, validate_slug
@@ -98,6 +99,15 @@ def _sources(value: object) -> list[dict[str, Any]]:
 
 def _document(text: str) -> FrontmatterDocument:
     return parse_frontmatter(text)
+
+
+_MEANINGFUL_FIELDS = ("title", "description", "type", "scope", "resource", "sources")
+
+
+def _meaningful_change(before: FrontmatterDocument, after: FrontmatterDocument) -> bool:
+    return before.body != after.body or any(
+        before.metadata.get(field) != after.metadata.get(field) for field in _MEANINGFUL_FIELDS
+    )
 
 
 def _working(vault: Vault) -> dict[str, str]:
@@ -329,9 +339,18 @@ def apply_operations(
     summary: str,
     dry_run: bool = False,
     fault_hook: Any = None,
+    interactive_verification: bool = False,
 ) -> MutationResult:
     if not operations:
         raise TransactionError("batch must contain at least one operation")
+    if interactive_verification and (
+        len(operations) != 1
+        or operations[0].get("action") != "verify"
+        or context != MutationContext(str(config["identity"]["human"]))
+    ):
+        raise TransactionError(
+            "interactive verification requires one verify operation in the configured human context"
+        )
     actor = _validate_context(context, summary)
     state_dir = Path(config["transactions"]["state_dir"])
     try:
@@ -385,6 +404,8 @@ def apply_operations(
                     metadata["tags"] = list(operation["tags"])
                 if operation.get("status") is not None:
                     metadata["status"] = operation["status"]
+                if operation.get("resource") is not None:
+                    metadata["resource"] = operation["resource"]
                 sources = _sources(operation.get("sources"))
                 if sources:
                     metadata["sources"] = sources
@@ -422,6 +443,7 @@ def apply_operations(
                     "status",
                     "tags",
                     "sources",
+                    "resource",
                 )
                 if not any(
                     key in operation and operation[key] is not None for key in update_fields
@@ -429,9 +451,18 @@ def apply_operations(
                     raise TransactionError("update requires body or metadata input")
                 slug = _resolve_slug(working, str(operation.get("id", "")))
                 document = _document(working[slug])
+                before = FrontmatterDocument(copy.deepcopy(document.metadata), document.body)
                 metadata = document.metadata
                 old_title = str(metadata.get("title", slug))
-                for key in ("type", "title", "description", "scope", "status", "tags"):
+                for key in (
+                    "type",
+                    "title",
+                    "description",
+                    "scope",
+                    "status",
+                    "tags",
+                    "resource",
+                ):
                     if key in operation and operation[key] is not None:
                         metadata[key] = operation[key]
                 normalized_title = normalize_text(metadata.get("title", ""))
@@ -444,10 +475,12 @@ def apply_operations(
                         raise TransactionError(f"duplicate normalized title: concepts/{other_slug}")
                 if "sources" in operation:
                     metadata["sources"] = _sources(operation["sources"])
-                metadata["generated"] = copy.deepcopy(attribution)
-                metadata.pop("verified", None)
                 body = _body(operation, default=document.body)
-                text = render_frontmatter(FrontmatterDocument(metadata, body))
+                candidate = FrontmatterDocument(metadata, body)
+                if _meaningful_change(before, candidate):
+                    metadata["generated"] = copy.deepcopy(attribution)
+                    metadata.pop("verified", None)
+                text = render_frontmatter(candidate)
                 working[slug] = text
                 planned[slug] = text
                 outputs[f"memory/concepts/{slug}.md"] = text.encode()
@@ -456,6 +489,43 @@ def apply_operations(
                 )
                 ids.append(f"concepts/{slug}")
                 allow_long = allow_long or bool(operation.get("allow_long"))
+            elif action == "verify":
+                authorization_source = operation.get("authorization_source")
+                if not interactive_verification and (
+                    not isinstance(authorization_source, str) or not authorization_source.strip()
+                ):
+                    raise TransactionError(
+                        "noninteractive human verification requires an authorization source"
+                    )
+                note = operation.get("note")
+                if note is not None and (not isinstance(note, str) or not note.strip()):
+                    raise TransactionError("verification note must be non-empty when supplied")
+                slug = _resolve_slug(working, str(operation.get("id", "")))
+                document = _document(working[slug])
+                metadata = document.metadata
+                current = metadata.get("verified")
+                if isinstance(current, Mapping):
+                    events = [copy.deepcopy(current)]
+                elif isinstance(current, Sequence) and not isinstance(current, str | bytes):
+                    events = list(copy.deepcopy(current))
+                elif current is None:
+                    events = []
+                else:
+                    raise TransactionError("verified must be a mapping or list of mappings")
+                event = CommentedMap({"by": config["identity"]["human"], "at": timestamp})
+                if isinstance(authorization_source, str) and authorization_source.strip():
+                    event["authorization_source"] = authorization_source
+                if isinstance(note, str):
+                    event["note"] = note
+                events.append(event)
+                metadata["verified"] = events
+                text = render_frontmatter(document)
+                working[slug] = text
+                planned[slug] = text
+                outputs[f"memory/concepts/{slug}.md"] = text.encode()
+                title = str(metadata.get("title", slug))
+                entries.append(_entry("Verification", slug, title, summary, context))
+                ids.append(f"concepts/{slug}")
             elif action == "delete":
                 slug = _resolve_slug(working, str(operation.get("id", "")))
                 document = _document(working[slug])
@@ -541,6 +611,193 @@ def apply_operations(
             fault_hook=fault_hook,
         )
         return MutationResult(transaction, tuple(dict.fromkeys(candidates)))
+
+
+def reconcile_concept(
+    vault: Vault,
+    config: Mapping[str, Any],
+    concept_id: str,
+    *,
+    summary: str,
+    dry_run: bool = False,
+    fault_hook: Any = None,
+) -> MutationResult:
+    """Adopt one tracked direct edit without absorbing other working-tree content."""
+
+    human = str(config["identity"]["human"])
+    context = MutationContext(human)
+    actor = _validate_context(context, summary)
+    state_dir = Path(config["transactions"]["state_dir"])
+    try:
+        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
+    except ValueError:
+        pass
+    else:
+        raise TransactionError("transaction state directory must be outside the vault")
+
+    with writer_lock(
+        state_dir / "writer.lock",
+        timeout=float(config["locking"]["timeout_seconds"]),
+        command="reconcile",
+        actor=human,
+    ):
+        committed = _head_texts(vault)
+        slug = _resolve_slug(committed, concept_id)
+        relative = f"memory/concepts/{slug}.md"
+        path = vault.root / relative
+        if path.is_symlink() or not path.is_file():
+            raise TransactionError(
+                "reconcile requires the tracked concept at its committed path; "
+                "direct filesystem renames are not inferred"
+            )
+        current_bytes = path.read_bytes()
+        current_text = current_bytes.decode("utf-8")
+        current_hash = hashlib.sha256(current_bytes).hexdigest()
+        committed_text = committed[slug]
+        if current_text == committed_text:
+            raise TransactionError("concept has no direct edit to reconcile")
+
+        before = _document(committed_text)
+        candidate = _document(current_text)
+        candidate.metadata["created"] = copy.deepcopy(before.metadata["created"])
+        meaningful = _meaningful_change(before, candidate)
+        timestamp = _timestamp()
+        if meaningful:
+            candidate.metadata["generated"] = _attribution(actor, context, timestamp)
+            candidate.metadata.pop("verified", None)
+        else:
+            candidate.metadata["generated"] = copy.deepcopy(before.metadata["generated"])
+            if "verified" in before.metadata:
+                candidate.metadata["verified"] = copy.deepcopy(before.metadata["verified"])
+            else:
+                candidate.metadata.pop("verified", None)
+
+        normalized_title = normalize_text(candidate.metadata.get("title", ""))
+        for other_slug, text in committed.items():
+            if (
+                other_slug != slug
+                and normalize_text(_document(text).metadata.get("title", "")) == normalized_title
+            ):
+                raise TransactionError(f"duplicate normalized title: concepts/{other_slug}")
+
+        rendered = render_frontmatter(candidate)
+        if rendered == committed_text:
+            raise TransactionError(
+                "direct edit changes only immutable created or managed attribution metadata; "
+                "reconciliation rejected"
+            )
+        planned = dict(committed)
+        planned[slug] = rendered
+        log_path = vault.bundle / "log.md"
+        title = str(candidate.metadata.get("title", slug))
+        outputs = {
+            relative: rendered.encode(),
+            "memory/concepts/index.md": _render_index(planned).encode(),
+            "memory/log.md": _log(
+                log_path.read_text(encoding="utf-8"),
+                [_entry("Reconciliation", slug, title, summary, context)],
+                timestamp[:10],
+            ).encode(),
+        }
+        transaction = execute_transaction(
+            vault.root,
+            state_dir,
+            outputs,
+            branch=str(config["git"]["branch"]),
+            actor=human,
+            model=None,
+            session_id=None,
+            summary=summary,
+            subject=f"memory(human): reconcile {slug}",
+            concept_ids=(f"concepts/{slug}",),
+            configured_types=frozenset(config.get("types", DEFAULT_TYPES)),
+            max_words=int(config["limits"]["concept_words"]),
+            dry_run=dry_run,
+            fault_hook=fault_hook,
+            adopted_paths={relative: current_hash},
+        )
+        return MutationResult(transaction)
+
+
+def rebuild_index(
+    vault: Vault,
+    config: Mapping[str, Any],
+    *,
+    dry_run: bool = False,
+    fault_hook: Any = None,
+) -> MutationResult:
+    """Rebuild the concept index only from a clean concept corpus."""
+
+    state_dir = Path(config["transactions"]["state_dir"])
+    try:
+        state_dir.resolve(strict=False).relative_to(vault.root.resolve())
+    except ValueError:
+        pass
+    else:
+        raise TransactionError("transaction state directory must be outside the vault")
+
+    with writer_lock(
+        state_dir / "writer.lock",
+        timeout=float(config["locking"]["timeout_seconds"]),
+        command="rebuild-index",
+        actor="process:memory-cli",
+    ):
+        tracked = {
+            path
+            for path in head_concept_paths(vault.root)
+            if Path(path).parent == Path("memory/concepts") and Path(path).name != "index.md"
+        }
+        present = {
+            path.relative_to(vault.root).as_posix()
+            for path in (vault.bundle / "concepts").iterdir()
+            if path.name != "index.md" and path.suffix == ".md"
+        }
+        corpus_dirty = dirty_paths(vault.root, tuple(sorted(tracked | present)))
+        if corpus_dirty:
+            raise TransactionError(
+                "unreconciled concept edits block full index rebuild: "
+                f"{', '.join(corpus_dirty)}. Reconcile each changed tracked concept with "
+                "memory reconcile; resolve added, deleted, or renamed files manually."
+            )
+
+        rendered = _render_index(_head_texts(vault)).encode()
+        raced_present = {
+            path.relative_to(vault.root).as_posix()
+            for path in (vault.bundle / "concepts").iterdir()
+            if path.name != "index.md" and path.suffix == ".md"
+        }
+        raced_dirty = dirty_paths(vault.root, tuple(sorted(tracked | raced_present)))
+        if raced_dirty:
+            raise TransactionError(
+                "unreconciled concept edits block full index rebuild: "
+                f"{', '.join(raced_dirty)}. Reconcile each changed tracked concept with "
+                "memory reconcile; resolve added, deleted, or renamed files manually."
+            )
+        if vault.concept_index.read_bytes() == rendered:
+            dirty_index = dirty_paths(vault.root, ("memory/concepts/index.md",))
+            if dirty_index:
+                raise TransactionError(
+                    "transaction targets have uncommitted changes: memory/concepts/index.md. "
+                    "Resolve generated index edits manually."
+                )
+            return MutationResult(TransactionResult("no-op", (), None, dry_run))
+        transaction = execute_transaction(
+            vault.root,
+            state_dir,
+            {"memory/concepts/index.md": rendered},
+            branch=str(config["git"]["branch"]),
+            actor="process:memory-cli",
+            model=None,
+            session_id=None,
+            summary="Rebuild concept index",
+            subject="memory(process): rebuild concept index",
+            concept_ids=(),
+            configured_types=frozenset(config.get("types", DEFAULT_TYPES)),
+            max_words=int(config["limits"]["concept_words"]),
+            dry_run=dry_run,
+            fault_hook=fault_hook,
+        )
+        return MutationResult(transaction)
 
 
 def _body(operation: Mapping[str, Any], default: str | None = None) -> str:
