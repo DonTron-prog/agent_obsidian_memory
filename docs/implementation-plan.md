@@ -280,33 +280,35 @@ The user confirms that the product specification captures the intended system, i
 
 ## 10. Milestone 6 — Pi adapter
 
+**Status: Complete**
+
 ### Work
 
-1. Re-read the installed Pi extension, compaction, session, and environment documentation for the deployed version.
-2. Implement the global TypeScript extension using the `memory` CLI as its only memory-system boundary.
-3. Inject `memory/index.md` once per logical new session as visible context.
-4. Record injection audit in the durable spool.
-5. Atomically publish `session_compact` descriptors with stable saved-entry references, exposed native summaries, and host provenance.
-6. Publish finalization descriptors on new, resume, fork, and quit; ignore reload as a logical end.
-7. Include the active Pi model only as host provenance; do not call a summarizer.
-8. Show TUI notifications for publication and persistent worker failures.
-9. Add adapter version compatibility checks to `memory doctor`.
+1. [x] Re-read the installed Pi extension, compaction, session, and environment documentation for the deployed version.
+2. [x] Implement the global TypeScript extension using the `memory` CLI as its only memory-system boundary.
+3. [x] Inject `memory/index.md` once per logical new session as visible context.
+4. [x] Record injection audit in the durable spool.
+5. [x] Atomically publish `session_compact` descriptors with stable saved-entry references, exposed native summaries, and host provenance.
+6. [x] Publish finalization descriptors on new, resume, fork, and quit; ignore reload as a logical end.
+7. [x] Include the active Pi model only as host provenance; do not call a summarizer.
+8. [x] Show TUI notifications for publication and persistent worker failures.
+9. [x] Add adapter version compatibility checks to `memory doctor`.
 
 ### Tests
 
-- startup/new injects once;
-- reload does not duplicate injection or finalize;
-- two compactions produce two idempotent checkpoints;
-- `/new` finalizes the old session before new-session injection;
-- model changes are recorded exactly;
-- native-summary materialization failure does not cancel native session action;
-- immediate host termination after completed descriptor publication still permits worker recovery, without claiming recovery when the handler did not run;
-- extension shutdown on quit durably publishes pending audit references within the fixed timeout; and
-- no raw session JSONL is copied.
+- [x] startup/new injects once;
+- [x] reload does not duplicate injection or finalize;
+- [x] two compactions produce two idempotent checkpoints;
+- [x] `/new` finalizes the old session before new-session injection;
+- [x] model changes are recorded exactly;
+- [x] native-summary materialization failure does not cancel native session action;
+- [x] immediate host termination after completed descriptor publication still permits worker recovery, without claiming recovery when the handler did not run;
+- [x] extension shutdown on quit durably publishes pending audit references within the fixed timeout; and
+- [x] no raw session JSONL is copied.
 
 ### Gate
 
-Recorded Pi lifecycle events and a controlled Pi test invocation complete the adapter contract against a temporary vault. Production-vault and Obsidian validation are reserved for Milestones 8–9.
+- [x] Recorded Pi lifecycle events and a controlled Pi test invocation complete the adapter contract against a temporary vault. Production-vault and Obsidian validation are reserved for Milestones 8–9.
 
 ## 11. Milestone 7 — Hermes adapter
 

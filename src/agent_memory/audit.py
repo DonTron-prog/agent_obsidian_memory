@@ -63,6 +63,7 @@ def append_access_event(
     concepts: list[str],
     query: str | None = None,
     reason: str | None = None,
+    resource: str | None = None,
     timestamp: str | None = None,
 ) -> Path:
     """Append and fsync one complete locked JSONL record."""
@@ -80,6 +81,8 @@ def append_access_event(
         "reason": redact_sensitive_text(reason, limit=MAX_TEXT) if reason is not None else None,
         "concepts": concepts,
     }
+    if resource is not None:
+        event["resource"] = redact_sensitive_text(resource, limit=300)
     event = _validate_access_record(
         event,
         session_id=context.session_id,
@@ -139,28 +142,20 @@ def capture_offset(state_dir: str | Path, session_id: str) -> int:
 def _validate_access_record(
     value: object, *, session_id: str, raw: bytes, position: int
 ) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) not in (
-        {
-            "timestamp",
-            "mode",
-            "agent",
-            "model",
-            "session_id",
-            "query",
-            "reason",
-            "concepts",
-        },
-        {
-            "timestamp",
-            "mode",
-            "agent",
-            "model",
-            "session_id",
-            "event_id",
-            "query",
-            "reason",
-            "concepts",
-        },
+    required = {
+        "timestamp",
+        "mode",
+        "agent",
+        "model",
+        "session_id",
+        "query",
+        "reason",
+        "concepts",
+    }
+    if (
+        not isinstance(value, dict)
+        or not required <= set(value)
+        or (set(value) - required) - {"event_id", "resource"}
     ):
         raise AuditError("audit spool contains an invalid event")
     if value["session_id"] != session_id or value["mode"] not in {"injected", "search", "show"}:
@@ -184,6 +179,13 @@ def _validate_access_record(
             raise AuditError(f"audit event {key} is invalid")
         if item is not None:
             value[key] = redact_sensitive_text(item, limit=MAX_TEXT)
+    resource = value.get("resource")
+    if resource is not None and (
+        not isinstance(resource, str) or not resource or len(resource) > 300 or "\x00" in resource
+    ):
+        raise AuditError("audit event resource is invalid")
+    if resource is not None:
+        value["resource"] = redact_sensitive_text(resource, limit=300)
     concepts = value["concepts"]
     if (
         not isinstance(concepts, list)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
@@ -18,7 +19,13 @@ from agent_memory.audit import AuditError, RetrievalContext, append_access_event
 from agent_memory.config import ConfigError, load_config, validate_worker_state_dir
 from agent_memory.git import ensure_repository, staged_paths
 from agent_memory.initialization import initialize_vault
-from agent_memory.lifecycle import build_descriptor, now_utc, publish_descriptor
+from agent_memory.lifecycle import (
+    _fsync_directory,
+    build_descriptor,
+    now_utc,
+    publish_descriptor,
+    queue_paths,
+)
 from agent_memory.locking import writer_lock
 from agent_memory.mutations import (
     MutationContext,
@@ -27,6 +34,7 @@ from agent_memory.mutations import (
     rebuild_index,
     reconcile_concept,
 )
+from agent_memory.pi_adapter import pi_adapter_health
 from agent_memory.search import (
     SearchFilters,
     is_stale,
@@ -166,6 +174,17 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint.add_argument("--current-message-row-id", type=int)
     checkpoint.add_argument("--candidate-row-id", type=int)
     checkpoint.add_argument("--candidate-summary-sha256")
+    inject_session = session_commands.add_parser("inject")
+    inject_session.add_argument("--session-id", required=True)
+    inject_session.add_argument("--agent", required=True)
+    inject_session.add_argument("--model", required=True)
+    inject_session.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(inject_session)
+    notifications_session = session_commands.add_parser("notifications")
+    notifications_session.add_argument("--agent", required=True, choices=("pi", "hermes"))
+    notifications_session.add_argument("--ack", action="append", default=[])
+    notifications_session.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(notifications_session)
     access_session = session_commands.add_parser("access")
     access_session.add_argument("--session-id", required=True)
     access_session.add_argument("--agent", required=True)
@@ -506,12 +525,15 @@ def _doctor(args: argparse.Namespace) -> int:
             issues.append("writer lock metadata is unreadable")
     lifecycle = lifecycle_health(config["worker"]["state_dir"])
     issues.extend(lifecycle["issues"])
+    pi_adapter = pi_adapter_health()
+    issues.extend(pi_adapter["issues"])
     payload = {
         "ok": not issues,
         "issues": issues,
         "transactions": transactions,
         "lock_owner": lock_owner,
         "lifecycle": lifecycle,
+        "adapters": {"pi": pi_adapter},
     }
     if args.json_output:
         _json(payload)
@@ -832,6 +854,57 @@ def _session(args: argparse.Namespace) -> int:
     if args.session_command == "recover":
         changed = recover_incomplete(vault.root, config, agent=args.agent)
         payload = {"changed_paths": list(changed)}
+    elif args.session_command == "inject":
+        index = vault.root_index
+        content = index.read_text(encoding="utf-8")
+        append_access_event(
+            state,
+            RetrievalContext(args.session_id, args.agent, args.model),
+            mode="injected",
+            reason="new session",
+            resource="memory/index.md",
+            concepts=[],
+        )
+        payload = {
+            "content": content,
+            "custom_type": "agent-memory-root-index",
+            "session_id": args.session_id,
+        }
+    elif args.session_command == "notifications":
+        paths = queue_paths(state, create=True)
+        acknowledged: list[str] = []
+        for retry_id in args.ack:
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", retry_id):
+                raise ValueError("notification acknowledgement ID is unsafe")
+            target = paths.notifications / f"{retry_id}.json"
+            if target.is_file() and not target.is_symlink():
+                target.unlink()
+                acknowledged.append(retry_id)
+        if acknowledged:
+            _fsync_directory(paths.notifications)
+        notifications: list[dict[str, Any]] = []
+        for path in sorted(paths.notifications.glob("*.json")):
+            if path.is_symlink() or path.stat().st_size > 64 * 1024:
+                continue
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                isinstance(value, dict)
+                and value.get("schema") == "agent-memory.notification/v1"
+                and value.get("agent") in (None, args.agent)
+                and isinstance(value.get("retry_id"), str)
+                and isinstance(value.get("message"), str)
+            ):
+                notifications.append(
+                    {
+                        "retry_id": value["retry_id"],
+                        "severity": value.get("severity", "error"),
+                        "message": value["message"][:300],
+                    }
+                )
+        payload = {"notifications": notifications, "acknowledged": acknowledged}
     elif args.session_command == "access":
         path = append_access_event(
             state,

@@ -153,10 +153,12 @@ def _notify_failure(
     state_dir: Path, descriptor: Mapping[str, Any] | None, record: Mapping[str, Any]
 ) -> None:
     session_id = descriptor["session"]["session_id"] if descriptor else "unknown"
+    agent = descriptor["session"]["agent"] if descriptor else "unknown"
     target = queue_paths(state_dir, create=True).notifications / f"{record['retry_id']}.json"
     notification = {
         "schema": "agent-memory.notification/v1",
         "retry_id": record["retry_id"],
+        "agent": agent,
         "session_id": session_id,
         "severity": "error",
         "message": record["message"],

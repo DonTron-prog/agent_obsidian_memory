@@ -68,7 +68,7 @@ def _access_region(events: list[Mapping[str, Any]]) -> str:
     ]
     for event in events:
         reason = event.get("reason") or event.get("query") or ""
-        concepts = ", ".join(str(item) for item in event.get("concepts", []))
+        concepts = str(event.get("resource") or ", ".join(event.get("concepts", [])))
         lines.extend(
             [
                 f"<!-- access-event:{event['event_id']} -->",
