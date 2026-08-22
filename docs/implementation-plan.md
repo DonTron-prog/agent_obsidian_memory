@@ -357,16 +357,18 @@ The user confirms that the product specification captures the intended system, i
 
 ## 12. Milestone 8 — Syncthing, Obsidian, and manual private backup
 
+**Status: In progress**
+
 ### Work
 
-1. Create the server vault at `/home/donald/agent-memory` with `memory init`.
-2. Configure Syncthing on server and computer.
-3. Exclude `.git/`, machine-local Obsidian workspace files, locks, and transient state from synchronization, while ensuring Syncthing conflict copies remain detectable on the server.
-4. Open the local replica as an Obsidian vault.
-5. Enable the Bases core plugin and verify the nine required named views.
-6. Verify that writes remain available when Syncthing is stopped.
-7. Measure normal propagation time and document recovery steps, conflict handling, and the narrow replacement race.
-8. Configure and review a separate private Git remote suitable for work content, then perform a manual push outside the `memory` CLI.
+1. [x] Create the server vault at `/home/donald/agent-memory` with `memory init`.
+2. [ ] Configure Syncthing on server and computer.
+3. [ ] Exclude `.git/`, machine-local Obsidian workspace files, locks, and transient state from synchronization, while ensuring Syncthing conflict copies remain detectable on the server.
+4. [ ] Open the local replica as an Obsidian vault.
+5. [ ] Enable the Bases core plugin and verify the nine required named views.
+6. [x] Verify that writes remain available when Syncthing is stopped.
+7. [ ] Measure normal propagation time and document recovery steps, conflict handling, and the narrow replacement race.
+8. [ ] Configure and review a separate private Git remote suitable for work content, then perform a manual push outside the `memory` CLI.
 
 ### Gate
 

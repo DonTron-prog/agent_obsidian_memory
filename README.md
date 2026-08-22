@@ -4,12 +4,13 @@ A local-first, observable memory system shared by Pi and Hermes Agent. Durable k
 
 ## Status and documents
 
-Milestones 1–6 are complete, including the pinned Pi 0.84.2 global adapter.
+Milestones 1–7 are complete; Milestone 8 deployment is in progress.
 
 - [Product specification](docs/product-specification.md) — **sole normative source; wins on conflict**
 - [Technical specification](docs/technical-specification.md) — derived architecture and contracts
 - [Implementation and validation plan](docs/implementation-plan.md) — derived delivery plan
 - [Lifecycle runbook](docs/lifecycle-runbook.md) — oneshot drain, retry, and recovery operations
+- [Syncthing and Obsidian runbook](docs/syncthing-obsidian-runbook.md) — replication, direct-edit recovery, and manual private backup
 - [Pi adapter](adapters/pi/README.md) — global installation and pinned compatibility
 - [Main user stories](docs/user-stories.md) — informative outcomes
 - [Compatibility document](MEMORY_SYSTEM_SPECIFICATION.md) — navigation for the former specification path
