@@ -1,0 +1,8 @@
+name: agent-memory
+version: "0.1.0"
+description: Inject Agent Obsidian Memory and publish Hermes lifecycle state
+provides_hooks:
+  - pre_llm_call
+  - on_session_start
+  - on_session_finalize
+  - on_session_reset

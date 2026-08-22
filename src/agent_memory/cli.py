@@ -18,6 +18,12 @@ from agent_memory import __version__
 from agent_memory.audit import AuditError, RetrievalContext, append_access_event
 from agent_memory.config import ConfigError, load_config, validate_worker_state_dir
 from agent_memory.git import ensure_repository, staged_paths
+from agent_memory.hermes_adapter import (
+    bind_session,
+    finalize_session,
+    hermes_adapter_health,
+    publish_compression,
+)
 from agent_memory.initialization import initialize_vault
 from agent_memory.lifecycle import (
     _fsync_directory,
@@ -180,8 +186,35 @@ def build_parser() -> argparse.ArgumentParser:
     inject_session.add_argument("--model", required=True)
     inject_session.add_argument("--json", action="store_true", dest="json_output")
     _add_location(inject_session)
+    hermes_bind = session_commands.add_parser("hermes-bind")
+    hermes_bind.add_argument("--session-id", required=True)
+    hermes_bind.add_argument("--model")
+    hermes_bind.add_argument("--platform", required=True)
+    hermes_bind.add_argument("--native-store-ref", required=True)
+    hermes_bind.add_argument("--sender-id")
+    hermes_bind.add_argument("--chat-type")
+    hermes_bind.add_argument("--defer-injection", action="store_true")
+    hermes_bind.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(hermes_bind)
+    hermes_compress = session_commands.add_parser("hermes-compress")
+    hermes_compress.add_argument("--platform", required=True)
+    hermes_compress.add_argument("--session-id", required=True)
+    hermes_compress.add_argument("--old-session-id")
+    hermes_compress.add_argument("--in-place", action="store_true")
+    hermes_compress.add_argument("--compression-count", required=True, type=int)
+    hermes_compress.add_argument("--native-store-ref", required=True)
+    hermes_compress.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(hermes_compress)
+    hermes_finalize = session_commands.add_parser("hermes-finalize")
+    hermes_finalize.add_argument("--session-id", required=True)
+    hermes_finalize.add_argument("--platform", required=True)
+    hermes_finalize.add_argument("--native-store-ref", required=True)
+    hermes_finalize.add_argument("--reason", default="finalization")
+    hermes_finalize.add_argument("--json", action="store_true", dest="json_output")
+    _add_location(hermes_finalize)
     notifications_session = session_commands.add_parser("notifications")
     notifications_session.add_argument("--agent", required=True, choices=("pi", "hermes"))
+    notifications_session.add_argument("--session-id")
     notifications_session.add_argument("--ack", action="append", default=[])
     notifications_session.add_argument("--json", action="store_true", dest="json_output")
     _add_location(notifications_session)
@@ -527,13 +560,15 @@ def _doctor(args: argparse.Namespace) -> int:
     issues.extend(lifecycle["issues"])
     pi_adapter = pi_adapter_health()
     issues.extend(pi_adapter["issues"])
+    hermes_adapter = hermes_adapter_health()
+    issues.extend(hermes_adapter["issues"])
     payload = {
         "ok": not issues,
         "issues": issues,
         "transactions": transactions,
         "lock_owner": lock_owner,
         "lifecycle": lifecycle,
-        "adapters": {"pi": pi_adapter},
+        "adapters": {"pi": pi_adapter, "hermes": hermes_adapter},
     }
     if args.json_output:
         _json(payload)
@@ -854,6 +889,36 @@ def _session(args: argparse.Namespace) -> int:
     if args.session_command == "recover":
         changed = recover_incomplete(vault.root, config, agent=args.agent)
         payload = {"changed_paths": list(changed)}
+    elif args.session_command == "hermes-bind":
+        payload = bind_session(
+            vault.root,
+            config,
+            session_id=args.session_id,
+            model=args.model,
+            platform=args.platform,
+            native_store_ref=args.native_store_ref,
+            sender_id=args.sender_id,
+            chat_type=args.chat_type,
+            defer_injection=args.defer_injection,
+        )
+    elif args.session_command == "hermes-compress":
+        payload = publish_compression(
+            config,
+            platform=args.platform,
+            session_id=args.session_id,
+            old_session_id=args.old_session_id,
+            in_place=args.in_place,
+            compression_count=args.compression_count,
+            native_store_ref=args.native_store_ref,
+        )
+    elif args.session_command == "hermes-finalize":
+        payload = finalize_session(
+            config,
+            session_id=args.session_id,
+            platform=args.platform,
+            native_store_ref=args.native_store_ref,
+            reason=args.reason,
+        )
     elif args.session_command == "inject":
         index = vault.root_index
         content = index.read_text(encoding="utf-8")
@@ -894,6 +959,7 @@ def _session(args: argparse.Namespace) -> int:
                 isinstance(value, dict)
                 and value.get("schema") == "agent-memory.notification/v1"
                 and value.get("agent") in (None, args.agent)
+                and (args.session_id is None or value.get("session_id") == args.session_id)
                 and isinstance(value.get("retry_id"), str)
                 and isinstance(value.get("message"), str)
             ):

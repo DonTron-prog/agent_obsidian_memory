@@ -1,0 +1,4 @@
+name: agent-memory
+description: Publish bounded Hermes compression lifecycle descriptors
+events:
+  - session:compress

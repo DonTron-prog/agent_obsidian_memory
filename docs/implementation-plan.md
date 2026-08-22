@@ -312,46 +312,48 @@ The user confirms that the product specification captures the intended system, i
 
 ## 11. Milestone 7 — Hermes adapter
 
+**Status: Complete**
+
 ### Work
 
-1. Re-read the installed Hermes plugin, hooks, context, and sessions documentation for the deployed version.
-2. Implement and enable a user plugin for CLI and gateway lifecycle, using the `memory` CLI as its only memory-system boundary.
-3. On every `pre_llm_call`, lazily and idempotently bind the current Hermes session and inject the root index only when the persisted injection identity is absent; do not depend on `on_session_start` for continued/resumed sessions.
-4. Persist injection identity, old/new compression lineage, and the current message-row high-water boundary across restart/resume. Bind exact model, session, platform, and chat context safely under concurrent gateway sessions, but use model provenance only from a separate reliable plugin context.
-5. Implement a gateway `HOOK.yaml` handler for `session:compress`. Treat its installed 0.20.0 payload—only `platform`, `session_id`, `old_session_id`, `in_place`, and `compression_count`—as a committed-compression signal. Under the adapter-state lock, query only bounded message row IDs, summary-classification metadata, and content; atomically publish the five fields, previous/current high-water boundaries, and nullable isolated-summary candidate row ID/SHA-256, with no summary/raw text, then persist the current boundary and lineage before returning.
-6. Compute the event ID from a versioned canonical serialization of every published identity field, including boundaries and nullable candidate identity, rather than the five hook fields alone. Make the worker order queued descriptors within each logical lineage by ascending message-row boundary, fetch each exact bounded row, re-isolate a recognized Hermes 0.20.0 standalone or merged summary segment using its prefix, merged delimiter, and end marker, verify row ID/hash, and store only the isolated segment. Never serialize preserved tail/live user content, archived/raw conversation rows, or `pre_llm_call` history.
-7. Publish finalization descriptors on `/new`, reset, gateway rotation/GC, and CLI exit so lifecycle/audit state is flushed.
-8. For Hermes CLI 0.20.0, record lifecycle metadata and `native summary unavailable` unless a separate reliable host surface exposes a classified native summary. Never reconstruct an intermediate interval or patch Hermes core.
-9. Do not invoke host-owned or configured model completion; the gateway hook does not expose model identity.
-10. Notify the originating interface and authenticated Telegram owner DM where supported.
-11. Add compatibility checks to `memory doctor`.
+1. [x] Re-read the installed Hermes plugin, hooks, context, and sessions documentation for the deployed version.
+2. [x] Implement and enable a user plugin for CLI and gateway lifecycle, using the `memory` CLI as its only memory-system boundary.
+3. [x] On every `pre_llm_call`, lazily and idempotently bind the current Hermes session and inject the root index only when the persisted injection identity is absent; do not depend on `on_session_start` for continued/resumed sessions.
+4. [x] Persist injection identity, old/new compression lineage, and the current message-row high-water boundary across restart/resume. Bind exact model, session, platform, and chat context safely under concurrent gateway sessions, but use model provenance only from a separate reliable plugin context.
+5. [x] Implement a gateway `HOOK.yaml` handler for `session:compress`. Treat its installed 0.20.0 payload—only `platform`, `session_id`, `old_session_id`, `in_place`, and `compression_count`—as a committed-compression signal. Under the adapter-state lock, query only bounded message row IDs, summary-classification metadata, and content; atomically publish the five fields, previous/current high-water boundaries, and nullable isolated-summary candidate row ID/SHA-256, with no summary/raw text, then persist the current boundary and lineage before returning.
+6. [x] Compute the event ID from a versioned canonical serialization of every published identity field, including boundaries and nullable candidate identity, rather than the five hook fields alone. Make the worker order queued descriptors within each logical lineage by ascending message-row boundary, fetch each exact bounded row, re-isolate a recognized Hermes 0.20.0 standalone or merged summary segment using its prefix, merged delimiter, and end marker, verify row ID/hash, and store only the isolated segment. Never serialize preserved tail/live user content, archived/raw conversation rows, or `pre_llm_call` history.
+7. [x] Publish finalization descriptors on `/new`, reset, gateway rotation/GC, and CLI exit so lifecycle/audit state is flushed.
+8. [x] For Hermes CLI 0.20.0, record lifecycle metadata and `native summary unavailable` unless a separate reliable host surface exposes a classified native summary. Never reconstruct an intermediate interval or patch Hermes core.
+9. [x] Do not invoke host-owned or configured model completion; the gateway hook does not expose model identity.
+10. [x] Notify the originating interface and authenticated Telegram owner DM where supported.
+11. [x] Add compatibility checks to `memory doctor`.
 
 ### Tests
 
-- CLI and Telegram sessions use distinct IDs;
-- first-turn injection happens once, and every later `pre_llm_call` rebinds idempotently;
-- continued/resumed sessions bind and avoid duplicate injection when `on_session_start` is absent;
-- process restart preserves injection identity and old/new compression lineage;
-- the gateway payload contract rejects any assumption that summary, model, timestamp, or native event ID is present;
-- replaying the same exposed fields, boundaries, and candidate identity produces the same versioned deterministic event ID;
-- two in-place compressions published without draining bind successive non-overlapping message-row boundaries and later drain as distinct ordered event IDs/checkpoints;
-- after process restart with `compression_count` reset, persisted boundary/lineage produces another distinct ordered event ID/checkpoint rather than colliding with an older event;
-- repeated gateway in-place compression increments the same summary file;
-- rotated gateway compression maps persisted old/new IDs without orphaning checkpoints;
-- the resolver fetches only the descriptor-bound row, re-isolates a recognized standalone carrier, verifies row ID/segment hash, and stores only that segment;
-- a recognized merged carrier stores only the isolated summary segment and excludes its preserved tail/live user content;
-- duplicate/misordered markers, multiple candidates, changed rows, and hash mismatch record `native summary unavailable`, while non-summary/raw rows and `pre_llm_call` history never enter a descriptor or checkpoint;
-- Hermes CLI reset/finalization records `native summary unavailable` when no separate reliable native summary is exposed;
-- `/new` finalizes the outgoing ID and binds the new ID;
-- concurrent Telegram sessions do not leak session context;
-- notifications cannot target a group or unknown user;
-- model/provider changes are recorded only when available from reliable session-scoped plugin context;
-- failure does not prevent reset; and
-- `state.db` and legacy raw sessions remain outside the vault.
+- [x] CLI and Telegram sessions use distinct IDs;
+- [x] first-turn injection happens once, and every later `pre_llm_call` rebinds idempotently;
+- [x] continued/resumed sessions bind and avoid duplicate injection when `on_session_start` is absent;
+- [x] process restart preserves injection identity and old/new compression lineage;
+- [x] the gateway payload contract rejects any assumption that summary, model, timestamp, or native event ID is present;
+- [x] replaying the same exposed fields, boundaries, and candidate identity produces the same versioned deterministic event ID;
+- [x] two in-place compressions published without draining bind successive non-overlapping message-row boundaries and later drain as distinct ordered event IDs/checkpoints;
+- [x] after process restart with `compression_count` reset, persisted boundary/lineage produces another distinct ordered event ID/checkpoint rather than colliding with an older event;
+- [x] repeated gateway in-place compression increments the same summary file;
+- [x] rotated gateway compression maps persisted old/new IDs without orphaning checkpoints;
+- [x] the resolver fetches only the descriptor-bound row, re-isolates a recognized standalone carrier, verifies row ID/segment hash, and stores only that segment;
+- [x] a recognized merged carrier stores only the isolated summary segment and excludes its preserved tail/live user content;
+- [x] duplicate/misordered markers, multiple candidates, changed rows, and hash mismatch record `native summary unavailable`, while non-summary/raw rows and `pre_llm_call` history never enter a descriptor or checkpoint;
+- [x] Hermes CLI reset/finalization records `native summary unavailable` when no separate reliable native summary is exposed;
+- [x] `/new` finalizes the outgoing ID and binds the new ID;
+- [x] concurrent Telegram sessions do not leak session context;
+- [x] notifications cannot target a group or unknown user;
+- [x] model/provider changes are recorded only when available from reliable session-scoped plugin context;
+- [x] failure does not prevent reset; and
+- [x] `state.db` and legacy raw sessions remain outside the vault.
 
 ### Gate
 
-Recorded Hermes CLI/gateway lifecycle events and controlled local adapter invocations complete the contract against a temporary vault. Live authenticated Telegram and production-vault validation are reserved for Milestone 9.
+- [x] Recorded Hermes CLI/gateway lifecycle events and controlled local adapter invocations complete the contract against a temporary vault. Live authenticated Telegram and production-vault validation are reserved for Milestone 9.
 
 ## 12. Milestone 8 — Syncthing, Obsidian, and manual private backup
 

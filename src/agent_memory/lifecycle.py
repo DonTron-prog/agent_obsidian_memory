@@ -293,10 +293,7 @@ def validate_descriptor(value: object) -> dict[str, Any]:
         if host.get("platform") != source["platform"]:
             raise LifecycleError("Hermes source platform must match host.platform")
         if source["in_place"]:
-            if session["session_id"] != source["session_id"] or source["old_session_id"] not in {
-                None,
-                source["session_id"],
-            }:
+            if source["old_session_id"] not in {None, source["session_id"]}:
                 raise LifecycleError("in-place Hermes source lineage is invalid")
         elif source["old_session_id"] is None or source["old_session_id"] == source["session_id"]:
             raise LifecycleError("rotated Hermes source lineage is invalid")
